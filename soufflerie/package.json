@@ -1,0 +1,19 @@
+{
+  "name": "soufflerie-numerique",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Soufflerie numérique 2D/3D (Lattice Boltzmann LES) pour l'étude aérodynamique automobile",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "build:single": "vite build && node scripts/make-single.mjs",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "three": "0.180.0"
+  },
+  "devDependencies": {
+    "vite": "7.1.5"
+  }
+}

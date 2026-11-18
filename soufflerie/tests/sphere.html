@@ -1,0 +1,41 @@
+<!doctype html><html><body><canvas id="c" width="64" height="64"></canvas>
+<script type="module">
+import * as THREE from 'three';
+import { GPU } from '/src/sim/gpgpu.js';
+import { LBM } from '/src/sim/lbm.js';
+import { D3Q19 } from '/src/sim/lattice.js';
+const q = new URLSearchParams(location.search);
+const renderer = new THREE.WebGLRenderer({ canvas: document.getElementById('c') });
+const gpu = new GPU(renderer);
+const nx = 96, ny = 48, nz = 48, D = Number(q.get('d') || 12), cx = 30, cy = 24, cz = 24;
+const ground = q.get('ground') === '1';
+const sim = new LBM(gpu, { lattice: D3Q19, nx, ny, nz, bottom: ground ? 'ground' : 'farfield' });
+const cat = new Uint8Array(nx * ny * nz);
+const box = q.get('box') === '1';
+for (let k = 0; k < nz; k++) for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
+  const dx = i + 0.5 - cx, dy = j + 0.5 - (ground ? D / 2 + 3 : cy), dz = k + 0.5 - cz;
+  const inside = box ? (Math.abs(dx) < D / 2 && Math.abs(dy) < D / 2 && Math.abs(dz) < D / 2) : dx * dx + dy * dy + dz * dz < (D / 2) ** 2;
+  if (inside) cat[i + nx * (j + ny * k)] = 1;
+}
+sim.setSolid(cat, []);
+const U = 0.08, Re = Number(q.get('re') || 100);
+sim.setParams({ U, tau0: 0.5 + 3 * (U * D / Re), cs: Number(q.get('cs') || 0), groundU: Number(q.get('gu') || 0) * U, sponge: 0.9, absorb: Number(q.get('ab') || 0.06) });
+sim.reset();
+window.run = async (n) => {
+  const out = [];
+  const A = box ? D * D : Math.PI * D * D / 4;
+  const warm = Number(q.get('warm') || 0);
+  for (let s = 0; s < n; s += 100) {
+    if (warm) {
+      const t = Math.min(1, s / warm);
+      const nuT = 0.5 * 0.1 * (1 - t) + (U * D / Re);
+      sim.setParams({ tau0: 0.5 + 3 * nuT, cs: t < 1 ? 0 : Number(q.get('cs') || 0) });
+    }
+    sim.step(100);
+    const r = await sim.measureForces([cx, cy, cz], false, 4);
+    out.push((r.cats[0][0] / (0.5 * U * U * A)).toFixed(3) + '/' + (r.cats[0][1] / (0.5 * U * U * A)).toFixed(3));
+  }
+  return out.join(' ');
+};
+window.ready = true;
+</script></body></html>

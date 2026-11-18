@@ -1,0 +1,28 @@
+<!doctype html><html><body><canvas id="c" width="64" height="64"></canvas>
+<script type="module">
+import * as THREE from 'three';
+import { GPU } from '/src/sim/gpgpu.js';
+import { Tunnel } from '/src/sim/tunnel.js';
+import { CARS } from '/src/geometry/cars.js';
+const q = new URLSearchParams(location.search);
+const renderer = new THREE.WebGLRenderer({ canvas: document.getElementById('c') });
+const gpu = new GPU(renderer);
+const tunnel = new Tunnel(gpu);
+const carId = q.get('car') || 'road';
+const car = CARS[carId].build({});
+const mode = q.get('mode') || '3d';
+tunnel.setup({ car, mode, quality: q.get('q') || 'low', yaw: 0, section: Number(q.get('sec') || 0), silhouette: q.get('sil') === '1',
+  speed: CARS[carId].speed, tempC: 20, altitude: 0, rollingRoad: q.get('rr') !== '0', rotatingWheels: q.get('rw') !== '0', turbulence: Number(q.get('turb') ?? 0.5), carParams: {} });
+window.run = async (tEnd) => {
+  const out = [];
+  const t0 = performance.now();
+  while (tunnel.tStar < tEnd) {
+    tunnel.step(mode === '3d' ? 12 : 40);
+    const r = await tunnel.measure();
+    if (r) out.push([r.tStar.toFixed(2), r.Cx.toFixed(3), r.Cz.toFixed(3), (r.balance ?? 0).toFixed(2)]);
+  }
+  const st = tunnel.stats(1.0, 0.6);
+  return { grid: tunnel.grid, area: tunnel.area, ms: performance.now() - t0, steps: tunnel.sim.steps, mean: { Cx: st.mean.Cx, Cz: st.mean.Cz, bal: st.mean.balance, drag: st.mean.drag, lift: st.mean.lift, comps: st.mean.comps.map(c => [c.Fx.toFixed(0), c.Fy.toFixed(0)]) }, conv: st.converged, hist: out.filter((_, i) => i % Math.max(1, Math.floor(out.length / 25)) === 0) };
+};
+window.__val = { tunnel, gpu }; window.ready = true;
+</script></body></html>

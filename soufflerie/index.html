@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>Soufflerie numérique</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="description" content="Soufflerie numérique 2D/3D : simulation Lattice Boltzmann (LES) de l'aérodynamique d'une F1, d'une Hypercar et d'une citadine.">
+<meta name="theme-color" content="#0b0e13">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Soufflerie">
+<link rel="manifest" href="./manifest.webmanifest">
+<link rel="icon" href="./icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="./icons/icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&family=Barlow+Semi+Condensed:wght@500;600&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="./src/style.css">
+</head>
+<body>
+<div id="app">
+  <header class="topbar">
+    <div class="brand">
+      <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true"><path d="M3 11h17a4 4 0 1 0-4-4" /><path d="M3 17h23a4 4 0 1 1-4 4" /><path d="M3 23h11" /></svg>
+      <div class="brand-text"><span class="brand-name">Soufflerie</span><span class="brand-sub">numérique · LBM-LES</span></div>
+    </div>
+    <div class="seg" id="carSeg" role="radiogroup" aria-label="Modèle"></div>
+    <div class="seg seg-dim" id="dimSeg" role="radiogroup" aria-label="Visualisation">
+      <button type="button" data-v="2d" role="radio">2D</button>
+      <button type="button" data-v="3d" role="radio">3D</button>
+    </div>
+    <div class="top-actions">
+      <button type="button" class="icon-btn" id="playBtn" aria-label="Pause">
+        <svg viewBox="0 0 24 24" class="i-pause"><path d="M8 5v14M16 5v14"/></svg>
+        <svg viewBox="0 0 24 24" class="i-play"><path d="M7 4.5v15l12-7.5z"/></svg>
+      </button>
+      <button type="button" class="icon-btn" id="resetBtn" aria-label="Relancer l'écoulement"><svg viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 0 2.4-5.7"/><path d="M4 4v4h4"/></svg></button>
+      <button type="button" class="icon-btn" id="infoBtn" aria-label="Méthode et hypothèses"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5v.5"/></svg></button>
+    </div>
+  </header>
+
+  <main class="stage">
+    <div class="viewport" id="viewport">
+      <canvas id="gl"></canvas>
+      <canvas id="overlay"></canvas>
+      <div class="hud hud-top" id="hudTop"></div>
+      <div class="hud hud-bottom" id="hudBottom"></div>
+      <div class="legend" id="legend" hidden></div>
+      <div class="probe-card" id="probeCard" hidden></div>
+      <div class="cam-presets" id="camPresets"></div>
+      <div class="busy" id="busy" hidden><div class="spinner"></div><span id="busyText">Préparation du maillage…</span></div>
+      <div class="fatal" id="fatal" hidden></div>
+    </div>
+
+    <aside class="panel" id="panel">
+      <nav class="tabs" role="tablist">
+        <button type="button" role="tab" data-tab="essai" aria-selected="true">Essai</button>
+        <button type="button" role="tab" data-tab="mesures" aria-selected="false">Mesures</button>
+        <button type="button" role="tab" data-tab="visu" aria-selected="false">Visualisation</button>
+      </nav>
+      <div class="tab-body" id="tab-essai" role="tabpanel"></div>
+      <div class="tab-body" id="tab-mesures" role="tabpanel" hidden></div>
+      <div class="tab-body" id="tab-visu" role="tabpanel" hidden></div>
+    </aside>
+  </main>
+
+  <div class="sheet" id="infoSheet" hidden>
+    <div class="sheet-card" role="dialog" aria-modal="true" aria-labelledby="infoTitle">
+      <button type="button" class="icon-btn sheet-close" id="infoClose" aria-label="Fermer"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+      <div id="infoBody"></div>
+    </div>
+  </div>
+  <div class="toast" id="toast" hidden></div>
+</div>
+<script type="module" src="./src/main.js"></script>
+</body>
+</html>

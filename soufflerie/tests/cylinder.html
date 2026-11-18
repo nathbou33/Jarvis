@@ -1,0 +1,33 @@
+<!doctype html><html><body><canvas id="c" width="400" height="200"></canvas>
+<script type="module">
+import * as THREE from 'three';
+import { GPU } from '/src/sim/gpgpu.js';
+import { LBM } from '/src/sim/lbm.js';
+import { D2Q9 } from '/src/sim/lattice.js';
+const renderer = new THREE.WebGLRenderer({ canvas: document.getElementById('c') });
+const gpu = new GPU(renderer);
+const nx = 400, ny = 160, D = 20, cx = 80, cy = 80;
+const sim = new LBM(gpu, { lattice: D2Q9, nx, ny, bottom: 'farfield' }); sim.setParams({turb: Number(new URLSearchParams(location.search).get('turb')||0)});
+const cat = new Uint8Array(nx * ny);
+for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
+  const dx = i + 0.5 - cx, dy = j + 0.5 - cy;
+  if (dx * dx + dy * dy < (D / 2) ** 2) cat[i + nx * j] = 1;
+}
+sim.setSolid(cat, []);
+const U = 0.08, Re = Number(new URLSearchParams(location.search).get('re') || 100);
+const nu = U * D / Re;
+sim.setParams({ U, tau0: 0.5 + 3 * nu, cs: Number(new URLSearchParams(location.search).get('cs') || 0), groundU: 0, sponge: 0.5 });
+sim.reset();
+window.run = async (n) => {
+  const t0 = performance.now();
+  const hist = [];
+  for (let k = 0; k < n; k += 200) {
+    sim.step(200);
+    const r = await sim.measureForces([cx, cy, 0], false, 4);
+    const F = r.cats[0];
+    hist.push([F[0] / (0.5 * U * U * D), F[1] / (0.5 * U * U * D)]);
+  }
+  return { hist, ms: performance.now() - t0 };
+};
+window.ready = true;
+</script></body></html>

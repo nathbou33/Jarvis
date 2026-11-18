@@ -1,0 +1,46 @@
+<!doctype html><html><body style="margin:0;background:#000"><canvas id="c" width="64" height="64"></canvas><div id="out"></div>
+<script type="module">
+import * as THREE from 'three';
+import { GPU } from '/src/sim/gpgpu.js';
+import { Tunnel } from '/src/sim/tunnel.js';
+import { CARS } from '/src/geometry/cars.js';
+const q = new URLSearchParams(location.search);
+const renderer = new THREE.WebGLRenderer({ canvas: document.getElementById('c') });
+const gpu = new GPU(renderer);
+const tunnel = new Tunnel(gpu);
+const carId = q.get('car') || 'road';
+const car = CARS[carId].build({});
+tunnel.setup({ car, mode: q.get('mode') || '3d', quality: q.get('q') || 'low', yaw: 0, section: 0, speed: 130, tempC: 20, altitude: 0,
+  rollingRoad: q.get('rr') !== '0', rotatingWheels: q.get('rw') !== '0', turbulence: 0, carParams: {} });
+if (q.get('cs')) tunnel.cs = Number(q.get('cs'));
+window.run = async (n) => {
+  const hist = [];
+  for (let s = 0; s < n; s += 50) { tunnel.step(50); const r = await tunnel.measure(); if (r && s % 400 === 0) hist.push(r.tStar.toFixed(2) + ':' + r.Cx.toFixed(2)); }
+  tunnel.sim.computeMacro();
+  const sim = tunnel.sim, g = tunnel.grid;
+  const buf = gpu.readSync(sim.macro, 0, 0, sim.texW, sim.texH, 0);
+  const at = (i, j, k) => { const ty = Math.floor(k / sim.tx), tx = k - ty * sim.tx; return ((ty * g.ny + j) * sim.texW + tx * g.nx + i) * 4; };
+  const imgs = [];
+  const S = 6;
+  const draw = (w, h, f) => {
+    const cv = document.createElement('canvas'); cv.width = w * S; cv.height = h * S;
+    const ctx = cv.getContext('2d');
+    for (let b = 0; b < h; b++) for (let a = 0; a < w; a++) { ctx.fillStyle = f(a, h - 1 - b); ctx.fillRect(a * S, b * S, S, S); }
+    document.getElementById('out').append(cv);
+  };
+  const kc = Number(q.get("kc") ?? Math.floor(g.nz / 2));
+  const col = (v, lo, hi) => { const t = Math.max(0, Math.min(1, (v - lo) / (hi - lo))); return `rgb(${Math.round(255 * t)},${Math.round(255 * (1 - Math.abs(t - 0.5) * 2))},${Math.round(255 * (1 - t))})`; };
+  const solid = (i, j, k) => tunnel.cat[i + g.nx * (j + g.ny * k)];
+  draw(g.nx, g.ny, (i, j) => solid(i, j, kc) ? '#fff' : col(buf[at(i, j, kc)], -0.2, 1.5));
+  draw(g.nx, g.ny, (i, j) => solid(i, j, kc) ? '#fff' : col(buf[at(i, j, kc) + 3], -1.5, 1.5));
+  const jc = Number(new URLSearchParams(location.search).get("jc") || 1);
+  draw(g.nx, g.nz, (i, k) => solid(i, jc, k) ? '#fff' : col(buf[at(i, jc, k)], -0.2, 1.5));
+  draw(g.nx, g.nz, (i, k) => solid(i, jc, k) ? '#fff' : col(buf[at(i, jc, k) + 3], -1.5, 1.5));
+  // pression moyenne en amont / aval sur l'axe
+  const line = [];
+  for (let i = 0; i < g.nx; i += 6) line.push(buf[at(i, Math.min(g.ny - 2, 20), Math.min(g.nz - 1, 30)) + 3].toFixed(2));
+  let rs = 0, nn = 0; for (let k = 0; k < g.nz; k++) for (let j = 0; j < g.ny; j++) for (let i = 0; i < g.nx; i++) { if (!tunnel.cat[i + g.nx * (j + g.ny * k)]) { rs += buf[at(i, j, k) + 3]; nn++; } } line.push("meanCp=" + (rs / nn).toFixed(3));
+  return { hist: hist.join(' '), cpLine: line.join(' '), uTop: buf[at(50, g.ny - 2, kc)].toFixed(3) };
+};
+window.ready = true;
+</script></body></html>

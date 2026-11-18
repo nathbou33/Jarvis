@@ -1,0 +1,29 @@
+<!doctype html><html><body><canvas id="c" width="64" height="64"></canvas>
+<script type="module">
+import * as THREE from 'three';
+import { GPU } from '/src/sim/gpgpu.js';
+import { LBM } from '/src/sim/lbm.js';
+import { D2Q9 } from '/src/sim/lattice.js';
+const q = new URLSearchParams(location.search);
+const renderer = new THREE.WebGLRenderer({ canvas: document.getElementById('c') });
+const gpu = new GPU(renderer);
+const nx = 200, ny = 80;
+const sim = new LBM(gpu, { lattice: D2Q9, nx, ny, bottom: q.get('bottom') || 'ground' });
+const cat = new Uint8Array(nx * ny);
+const j0 = Number(q.get('j0') || 0); if (q.get('box')) for (let j = j0; j < j0 + 20; j++) for (let i = 60; i < 80; i++) cat[i + nx * j] = 1;
+sim.setSolid(cat, []);
+const U = 0.1;
+sim.setParams({ U, tau0: 0.5 + 3 * Number(q.get('nu') || 0.02), cs: Number(q.get('cs') || 0), groundU: Number(q.get('gu') || 0) * U, sponge: Number(q.get('sp') ?? 0.9) });
+sim.reset(U);
+const mass = () => { sim.computeMacro(); const b = gpu.readSync(sim.macro, 0, 0, nx, ny, 0); let m = 0, n = 0; for (let k = 0; k < nx * ny; k++) if (!cat[k]) { m += b[k * 4 + 3]; n++; } return (m / n).toFixed(4); };
+window.run = async () => {
+  const ms = [];
+  for (let k = 0; k < 4; k++) { sim.step(Number(q.get('n') || 2000) / 4); ms.push(mass()); }
+  sim.computeMacro();
+  const buf = gpu.readSync(sim.macro, 0, 0, nx, ny, 0);
+  const col = (i) => { let s = 0; for (let j = 0; j < ny; j++) s += buf[(i + nx * j) * 4]; return (s / ny).toFixed(3); };
+  const top = (i) => buf[(i + nx * (ny - 1)) * 4 + 1].toFixed(3);
+  return 'meanCp(t): ' + ms.join(',') + '  ' + [0, 10, 50, 100, 150, 199].map((i) => `x${i}:u=${col(i)} vtop=${top(i)} cp=${buf[(i + nx * 40) * 4 + 3].toFixed(2)}`).join('  ');
+};
+window.ready = true;
+</script></body></html>
