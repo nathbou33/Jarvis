@@ -52,13 +52,20 @@ export class Tunnel {
     // Triangles en repère soufflerie
     // les plaques minces situées dans le plan de symétrie (dérive, mât central) sont exclues
     // d'une coupe longitudinale 2D, où elles deviendraient des murs pleins
-    const sectionCut = opts.mode === 'side' && !opts.silhouette;
-    const solids = car.solids.filter((s) => !(sectionCut && s.noSection)).map((s) => {
+    // (en 3D aussi : sur une maille de plusieurs centimètres, une plaque de 1 à 2 cm dans le plan
+    // de symétrie deviendrait un mur de deux cellules d'épaisseur)
+    const sectionCut = (opts.mode === 'side' && !opts.silhouette) || opts.mode === '3d';
+    // en 3D, les éléments d'ailerons sont remplacés par le modèle de profil (forces volumiques)
+    this.useActuators = opts.mode === '3d' && !!(car.aero && car.aero.length);
+    // les petits éléments minces (déflecteurs, ailettes, volutes, rétroviseurs de F1) ne sont gardés
+    // dans la grille 3D que si la maille fait moins de 3 cm ; ils restent visibles et calculés en 2D
+    const dropDetails = opts.mode === '3d';
+    const solids = car.solids.filter((s) => !(sectionCut && s.noSection) && !(dropDetails && s.detail)).map((s) => {
       const m = new THREE.Matrix4().copy(this.yawMatrix);
       if (s.matrix) m.multiply(s.matrix);
-      return { tris: trianglesOf(s.geometry, m), cat: s.cat, thin: s.thin, priority: s.priority };
+      return { tris: trianglesOf(s.geometry, m), cat: s.cat, thin: s.thin, priority: s.priority, actuator: !!s.actuator };
     });
-    this.solids = solids;
+    this.solids = this.useActuators ? solids.filter((s) => !s.actuator) : solids;
     const box = new THREE.Box3();
     for (const s of solids) {
       for (let i = 0; i < s.tris.length; i += 3) box.expandByPoint(new THREE.Vector3(s.tris[i], s.tris[i + 1], s.tris[i + 2]));
@@ -110,11 +117,12 @@ export class Tunnel {
 
     // Voxelisation
     let cat;
-    if (opts.mode === '3d') cat = voxelize3D(solids, grid);
+    const vs = this.solids;
+    if (opts.mode === '3d') cat = voxelize3D(vs, grid);
     else if (opts.mode === 'side') {
-      if (opts.silhouette) cat = voxelizeSilhouette(solids, grid, box.min.z, box.max.z, Math.min(grid.dx, 0.02));
-      else cat = voxelizeSection(solids, grid, 'side', opts.section ?? 0);
-    } else cat = voxelizeSection(solids, grid, 'top', opts.section ?? 0.3);
+      if (opts.silhouette) cat = voxelizeSilhouette(vs, grid, box.min.z, box.max.z, Math.min(grid.dx, 0.02));
+      else cat = voxelizeSection(vs, grid, 'side', opts.section ?? 0);
+    } else cat = voxelizeSection(vs, grid, 'top', opts.section ?? 0.3);
     // retire les cellules au contact direct du sol fixe ? non : le pneu touche le sol (réaliste)
     this.cat = cat;
     let nSolid = 0;
@@ -142,6 +150,7 @@ export class Tunnel {
       this.layoutKey = this._layoutKey(opts);
     }
     this.sim.setSolid(cat, this._latticeWheels());
+    this._buildActuators();
     this.applyFlow();
     if (!keep) this.restart();
     else this.resetHistory(0.6);
@@ -282,9 +291,11 @@ export class Tunnel {
         ? [(ref.x - g.x0) / g.dx, (ref.z - g.y0) / g.dx, 0]
         : [(ref.x - g.x0) / g.dx, (ref.y - g.y0) / g.dx, this.mode === '3d' ? (ref.z - g.z0) / g.dx : 0];
       const stepAt = sim.steps;
+      const act = await this._updateActuators();
+      if (sim !== this.sim) return null;
       const r = await sim.measureForces(refLB, this.mode === '3d', 8);
       if (sim !== this.sim) return null;
-      const s = this._process(r, stepAt);
+      const s = this._process(r, stepAt, act, refLB);
       this.last = s;
       this.history.push(s);
       if (this.history.length > 4000) this.history.splice(0, this.history.length - 4000);
@@ -294,7 +305,108 @@ export class Tunnel {
     }
   }
 
-  _process(r, stepAt) {
+  // ---- Ailerons modélisés (3D) : éléments de profil couplés à l'écoulement ----
+  _buildActuators() {
+    this.act = null;
+    if (!this.useActuators || !this.sim) { if (this.sim) this.sim.setBodyMap(null); return; }
+    const car = this.opts.car;
+    const g = this.grid;
+    const sim = this.sim;
+    const M = new THREE.Matrix4().copy(this.yawMatrix).multiply(car.bodyMatrix);
+    const inv = M.clone().invert();
+    const sides = g.sym ? [1] : [1, -1];
+    const segs = [];
+    for (const w of car.aero) for (const sd of sides) for (let k = 0; k < w.segs; k++) {
+      const za = w.box.z0 + ((w.box.z1 - w.box.z0) * k) / w.segs, zb = w.box.z0 + ((w.box.z1 - w.box.z0) * (k + 1)) / w.segs;
+      segs.push({ w, side: sd, k, za, zb, n: 0 });
+    }
+    const segIndex = (w, sd, k) => segs.findIndex((t) => t.w === w && t.side === sd && t.k === k);
+    const data = new Float32Array(sim.texW * sim.texH * 4);
+    const pixOf = (i, j, k) => sim.pixIndex(i, j, k);
+    const v = new THREE.Vector3();
+    // répartition gaussienne de la force autour du quart avant de l'aile (σx ≈ 0,35 c, σy ≈ 0,5 c)
+    const wsum = new Float64Array(segs.length);
+    for (const w of car.aero) {
+      const b = w.box;
+      const xc = w.xLE + 0.45 * w.chord, yc = w.yRef;
+      const sx = Math.max(0.35 * w.chord, 1.5 * g.dx), sy = Math.max(0.5 * w.chord, 2 * g.dx);
+      w._k = { xc, yc, sx, sy };
+      const xa = xc - 2.2 * sx, xb = xc + 2.2 * sx, ya = Math.max(0, yc - 2.2 * sy), yb = yc + 2.2 * sy;
+      const lo = new THREE.Vector3(Infinity, Infinity, Infinity), hi = new THREE.Vector3(-Infinity, -Infinity, -Infinity);
+      for (const x of [xa, xb]) for (const y of [ya, yb]) for (const z of [b.z1, -b.z1]) {
+        v.set(x, y, z).applyMatrix4(M);
+        lo.min(v); hi.max(v);
+      }
+      const i0 = Math.max(0, Math.floor((lo.x - g.x0) / g.dx)), i1 = Math.min(g.nx - 1, Math.ceil((hi.x - g.x0) / g.dx));
+      const j0 = Math.max(0, Math.floor((lo.y - g.y0) / g.dx)), j1 = Math.min(g.ny - 1, Math.ceil((hi.y - g.y0) / g.dx));
+      const k0 = Math.max(0, Math.floor((lo.z - g.z0) / g.dx)), k1 = Math.min(g.nz - 1, Math.ceil((hi.z - g.z0) / g.dx));
+      for (let k = k0; k <= k1; k++) for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) {
+        if (this.cat[i + g.nx * (j + g.ny * k)]) continue;
+        v.set(g.x0 + (i + 0.5) * g.dx, g.y0 + (j + 0.5) * g.dx, g.z0 + (k + 0.5) * g.dx).applyMatrix4(inv);
+        const a = Math.abs(v.z);
+        if (a < b.z0 || a > b.z1 || v.y < 0) continue;
+        const ex = (v.x - xc) / sx, ey = (v.y - yc) / sy;
+        const r2 = ex * ex + ey * ey;
+        if (r2 > 4.84) continue;
+        const sd = g.sym ? 1 : v.z >= 0 ? 1 : -1;
+        const kk = Math.min(w.segs - 1, Math.floor(((a - b.z0) / (b.z1 - b.z0)) * w.segs));
+        const si = segIndex(w, sd, kk);
+        if (si < 0 || si >= 32) continue;
+        const pi = pixOf(i, j, k) * 4;
+        if (data[pi] > 0) continue;
+        const wt = Math.exp(-0.5 * r2);
+        data[pi] = si + 1;
+        data[pi + 1] = wt;
+        wsum[si] += wt;
+        segs[si].n++;
+      }
+    }
+    for (let p = 0; p < data.length; p += 4) if (data[p] > 0) data[p + 1] /= wsum[data[p] - 1];
+    const toCell = (x, y, z) => {
+      v.set(x, y, z).applyMatrix4(M);
+      return [(v.x - g.x0) / g.dx, (v.y - g.y0) / g.dx, (v.z - g.z0) / g.dx];
+    };
+    // sondes d'écoulement amont, juste hors de la zone de forçage
+    // trois sondes par segment (hauteurs décalées de ±0,4 corde) pour une vitesse d'entrée moyenne
+    const probes = [];
+    for (const sg of segs) for (const dy of [-0.4, 0, 0.4]) probes.push(toCell(sg.w._k.xc - 2.3 * sg.w._k.sx, Math.max(0.03, sg.w.yRef + dy * sg.w.chord), sg.side * (sg.za + sg.zb) / 2));
+    const centers = segs.map((sg) => toCell(sg.w._k.xc, sg.w.yRef, sg.side * (sg.za + sg.zb) / 2));
+    this.act = { segs, probes, centers };
+    sim.setBodyMap(data);
+    sim.setBodyForces([]);
+  }
+
+  async _updateActuators() {
+    const a = this.act;
+    if (!a) return null;
+    const sim = this.sim;
+    const g = this.grid;
+    sim.computeMacro();
+    const buf = await sim.probe(a.probes);
+    const Uc = sim.params.U;
+    const fluid = [];
+    const out = [];
+    a.segs.forEach((sg, i) => {
+      const w = sg.w;
+      let ux = 0, uy = 0;
+      for (let k = 0; k < 3; k++) { ux += buf[(3 * i + k) * 4] * Uc / 3; uy += buf[(3 * i + k) * 4 + 1] * Uc / 3; }
+      const phi = Math.atan2(uy, Math.max(ux, 1e-6));
+      const alpha = w.dAlpha - (phi * 180) / Math.PI;
+      const Cl = Math.min(w.Clmax, Math.max(-0.5, w.Cl0 + w.slope * alpha));
+      const ARe = w.AR * 1.6;
+      const CL = (Cl * ARe) / (ARe + 2);
+      const CD = w.Cd0 + w.k * Cl * Cl + (CL * CL) / (Math.PI * ARe);
+      const area = (w.chord / g.dx) * ((sg.zb - sg.za) / g.dx);
+      const q = 0.5 * (ux * ux + uy * uy);
+      const F = sg.n ? [q * area * (CL * Math.sin(phi) + CD * Math.cos(phi)), q * area * (-CL * Math.cos(phi) + CD * Math.sin(phi)), 0] : [0, 0, 0];
+      fluid.push([-F[0], -F[1], 0]);
+      out.push({ cat: w.cat, F, c: a.centers[i], CL, CD, alpha });
+    });
+    sim.setBodyForces(fluid);
+    return out;
+  }
+
+  _process(r, stepAt, act = null, refLB = [0, 0, 0]) {
     const g = this.grid;
     const U = this.U;
     const rho = this.air.rho;
@@ -312,6 +424,14 @@ export class Tunnel {
       if (g.sym) fz = 0;
       comps.push({ cat: c, Fx: fx * scale, Fy: fy * scale, Fz: fz * scale, M: v[3] * mScale });
       Fx += fx; Fy += fy; Fz += fz; Mz += v[3];
+    }
+    if (act) {
+      for (const e of act) {
+        const m = (e.c[0] - refLB[0]) * e.F[1] - (e.c[1] - refLB[1]) * e.F[0];
+        const cp = comps[e.cat - 1];
+        cp.Fx += e.F[0] * scale; cp.Fy += e.F[1] * scale; cp.M += m * mScale;
+        Fx += e.F[0]; Fy += e.F[1]; Mz += m;
+      }
     }
     const kb = 1;
     const F = { x: Fx * scale * kb, y: Fy * scale * kb, z: Fz * scale * kb };

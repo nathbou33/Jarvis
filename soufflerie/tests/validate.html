@@ -22,7 +22,9 @@ window.run = async (tEnd) => {
     if (r) out.push([r.tStar.toFixed(2), r.Cx.toFixed(3), r.Cz.toFixed(3), (r.balance ?? 0).toFixed(2)]);
   }
   const st = tunnel.stats(1.0, 0.6);
-  return { grid: tunnel.grid, area: tunnel.area, ms: performance.now() - t0, steps: tunnel.sim.steps, mean: { Cx: st.mean.Cx, Cz: st.mean.Cz, bal: st.mean.balance, drag: st.mean.drag, lift: st.mean.lift, comps: st.mean.comps.map(c => [c.Fx.toFixed(0), c.Fy.toFixed(0)]) }, conv: st.converged, hist: out.filter((_, i) => i % Math.max(1, Math.floor(out.length / 25)) === 0) };
+  let actInfo = null;
+  if (tunnel.act) { const a = await tunnel._updateActuators(); const pb = await tunnel.sim.probe(tunnel.act.probes); actInfo = a.map((e, i) => `cat${e.cat} u=${((pb[i*12]+pb[i*12+4]+pb[i*12+8])/3).toFixed(2)} v=${((pb[i*12+1]+pb[i*12+5]+pb[i*12+9])/3).toFixed(2)} a=${e.alpha.toFixed(1)} CL=${e.CL.toFixed(2)} Fy=${e.F[1].toFixed(4)} n=${tunnel.act.segs[i].n} p=${tunnel.act.probes[3*i+1].map(v=>v.toFixed(1)).join(',')}`); }
+  return { actInfo, grid: tunnel.grid, area: tunnel.area, ms: performance.now() - t0, steps: tunnel.sim.steps, mean: { Cx: st.mean.Cx, Cz: st.mean.Cz, bal: st.mean.balance, drag: st.mean.drag, lift: st.mean.lift, comps: st.mean.comps.map(c => [c.Fx.toFixed(0), c.Fy.toFixed(0)]) }, conv: st.converged, hist: out.filter((_, i) => i % Math.max(1, Math.floor(out.length / 25)) === 0) };
 };
 window.__val = { tunnel, gpu }; window.ready = true;
 </script></body></html>

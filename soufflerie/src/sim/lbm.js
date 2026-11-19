@@ -7,6 +7,7 @@
 //  - Efforts par échange de quantité de mouvement, ventilés par composant
 import * as THREE from 'three';
 import { Reducer } from './gpgpu.js';
+import { atlasSampler } from '../viz/glsl.js';
 
 const COMP = ['x', 'y', 'z', 'w'];
 const f = (v) => {
@@ -86,7 +87,41 @@ export class LBM {
     this.time = 0;
     this.steps = 0;
 
+    this.bodyTex = gpu.dataTexture(new Float32Array(this.texW * this.texH * 4), this.texW, this.texH);
+    this.probeRT = gpu.target(64, 1, 1);
     this._buildMaterials();
+  }
+
+  // ---- ailerons modélisés : carte des cellules (segment, poids) et forces par segment ----
+  setBodyMap(data) {
+    if (data) this.bodyTex.image.data.set(data);
+    else this.bodyTex.image.data.fill(0);
+    this.bodyTex.needsUpdate = true;
+    for (const m of this.stepMats) m.uniforms.uUseBody.value = data ? 1 : 0;
+  }
+  setBodyForces(list) {
+    for (const m of this.stepMats) {
+      for (let k = 0; k < 32; k++) {
+        const v = list[k] || [0, 0, 0];
+        m.uniforms.uSegF.value[k].set(v[0], v[1], v[2]);
+      }
+    }
+  }
+  // Vitesse (normalisée par U) aux points de sonde (coordonnées cellule)
+  async probe(points) {
+    if (!this.probeMat) {
+      this.probeMat = this.gpu.material(`precision highp float; precision highp int; precision highp sampler2D;
+${atlasSampler(this.nx, this.ny, this.nz, this.tx)}
+uniform sampler2D uMacro;
+uniform vec3 uPts[64];
+out vec4 o;
+void main() { o = asample(uMacro, uPts[int(gl_FragCoord.x)]); }`, { uMacro: { value: null }, uPts: { value: Array.from({ length: 64 }, () => new THREE.Vector3()) } });
+    }
+    const u = this.probeMat.uniforms;
+    for (let k = 0; k < 64; k++) u.uPts.value[k].set(...(points[k] || [1, 1, 1]));
+    u.uMacro.value = this.macro.texture;
+    this.gpu.pass(this.probeMat, this.probeRT);
+    return this.gpu.readAsync(this.probeRT, 0, 0, 64, 1, 0);
   }
 
   get atlasHeader() {
@@ -281,6 +316,9 @@ ${this._wheelFns()}
 uniform float uAbsorb;
 uniform float uTauBulk;
 uniform float uAbsorbOut;
+uniform sampler2D uBodyMap;
+uniform vec3 uSegF[32];
+uniform int uUseBody;
 // couches absorbantes : relaxation vers l'écoulement amont (amortit les ondes acoustiques)
 float absorb(ivec3 p) {
   float xi = (float(p.x) + 0.5) / float(NX);
@@ -335,6 +373,16 @@ void main() {
   if (ab > 0.0) {
     ${Array.from({ length: Q }, (_, i) => `g${i} = mix(g${i}, feq(${f(L.w[i])}, ${dot3(L.c[i], 'uin')}, uin2, 1.0), ab);`).join('\n    ')}
   }
+  // force volumique des ailerons modélisés (méthode de la différence exacte)
+  if (uUseBody == 1 && !bad) {
+    vec4 bm = texelFetch(uBodyMap, pix, 0);
+    if (bm.r > 0.5) {
+      vec3 Fb = uSegF[int(bm.r + 0.5) - 1] * bm.g;
+      vec3 uF = u + Fb / rho;
+      float uuF = dot(uF, uF);
+      ${Array.from({ length: Q }, (_, i) => `g${i} += feq(${f(L.w[i])}, ${dot3(L.c[i], 'uF')}, uuF, rho) - e${i};`).join('\n      ')}
+    }
+  }
   ${outWrite(group, (i) => `g${i}`)}
 }`;
       const uniforms = {
@@ -346,6 +394,9 @@ void main() {
         uAbsorb: { value: 0.06 },
         uTauBulk: { value: 1.0 },
         uAbsorbOut: { value: 0.08 },
+        uBodyMap: { value: this.bodyTex },
+        uSegF: { value: Array.from({ length: 32 }, () => new THREE.Vector3()) },
+        uUseBody: { value: 0 },
         uUin: { value: new THREE.Vector3(this.params.U, 0, 0) },
         uTurb: { value: 0 },
         uTime: { value: 0 },
@@ -658,6 +709,9 @@ void main() {
   dispose() {
     for (const rt of [...this.A.rts, ...this.B.rts]) rt.dispose();
     this.macro.dispose();
+    this.bodyTex.dispose();
+    this.probeRT.dispose();
+    if (this.probeMat) this.probeMat.dispose();
     for (const rt of [...this.meanRT, ...this.fastRT]) rt.dispose();
     this.meanMat.dispose();
     this.force.dispose();

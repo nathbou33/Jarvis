@@ -248,7 +248,7 @@ float weave(vec3 p, vec3 n) {
   float sheen = 0.5 + 0.5 * sin(band * 3.14159);
   return mix(0.78, 1.22, sheen * (dir < 0.5 ? 1.0 : 0.82));
 }`)
-      .replace('#include <color_fragment>', '#include <color_fragment>\n  diffuseColor.rgb *= weave(vCP, normalize(vCN));');
+      .replace('#include <color_fragment>', '#include <color_fragment>\n  float lumC = dot(diffuseColor.rgb, vec3(0.299, 0.587, 0.114));\n  diffuseColor.rgb *= mix(weave(vCP, normalize(vCN)), 1.0, smoothstep(0.06, 0.2, lumC));');
   };
   mat.customProgramCacheKey = () => `carbon-${scale}-${vertexColors}`;
   return mat;

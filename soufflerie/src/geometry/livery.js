@@ -2,7 +2,28 @@
 // et de courbes de forme de la voiture échantillonnées dans une petite texture.
 import * as THREE from 'three';
 
-export function liveryMaterial({ curves = [], x0 = 0, x1 = 5, palette, glsl, base = {} }) {
+// Atlas de décalques : 4 lignes de texte blanc sur fond transparent (inscriptions, numéros)
+function decalAtlas(texts) {
+  if (typeof document === 'undefined') return null;
+  const cv = document.createElement('canvas');
+  cv.width = 1024; cv.height = 1024;
+  const c = cv.getContext('2d');
+  c.fillStyle = '#fff';
+  c.textAlign = 'center';
+  c.textBaseline = 'middle';
+  texts.slice(0, 4).forEach((t, k) => {
+    let size = 200;
+    c.font = `800 ${size}px "Barlow Semi Condensed", "Arial Narrow", Arial, sans-serif`;
+    const w = c.measureText(t).width;
+    if (w > 960) { size = Math.floor((size * 960) / w); c.font = `800 ${size}px "Barlow Semi Condensed", "Arial Narrow", Arial, sans-serif`; }
+    c.fillText(t, 512, k * 256 + 132);
+  });
+  const tex = new THREE.CanvasTexture(cv);
+  tex.anisotropy = 4;
+  return tex;
+}
+
+export function liveryMaterial({ curves = [], x0 = 0, x1 = 5, palette, glsl, base = {}, decals = null }) {
   const N = 512;
   const data = new Float32Array(N * 4);
   for (let i = 0; i < N; i++) {
@@ -16,7 +37,9 @@ export function liveryMaterial({ curves = [], x0 = 0, x1 = 5, palette, glsl, bas
   const mat = new THREE.MeshPhysicalMaterial({
     color: 0xffffff, metalness: 0.45, roughness: 0.32, clearcoat: 1, clearcoatRoughness: 0.08, ...base,
   });
+  const atlas = decals ? decalAtlas(decals) : null;
   mat.onBeforeCompile = (sh) => {
+    sh.uniforms.uDecal = { value: atlas };
     sh.uniforms.uCurve = { value: tex };
     sh.uniforms.uPal = { value: pal };
     sh.uniforms.uCX = { value: new THREE.Vector2(x0, x1) };
@@ -32,6 +55,12 @@ uniform vec3 uPal[8];
 uniform vec2 uCX;
 float gR = -1.0;
 float gM = -1.0;
+uniform sampler2D uDecal;
+// décalque : ligne row de l atlas, uv dans [0,1]² (0,0 = coin bas gauche du texte)
+float decal(float row, vec2 uv) {
+  ${decals ? `if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) return 0.0;
+  return texture(uDecal, vec2(uv.x, (3.0 - row + uv.y) / 4.0)).a;` : 'return 0.0;'}
+}
 // tissage carbone procédural (sergé 2/2)
 float weave(vec3 p, vec3 n) {
   vec3 an = abs(n);
@@ -57,6 +86,6 @@ ${glsl}
       .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\n  if (gR >= 0.0) roughnessFactor = gR;')
       .replace('#include <metalnessmap_fragment>', '#include <metalnessmap_fragment>\n  if (gM >= 0.0) metalnessFactor = gM;');
   };
-  mat.customProgramCacheKey = () => 'livery-' + glsl.length + '-' + x0 + '-' + x1;
+  mat.customProgramCacheKey = () => 'livery-' + glsl.length + '-' + x0 + '-' + x1 + '-' + (decals ? decals.join('|') : '');
   return mat;
 }

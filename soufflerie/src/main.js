@@ -369,6 +369,7 @@ function renderEssai() {
     res.push(`Maille ${nf(g.dx * 1000)} mm · ${nf(perL)} cellules sur la longueur · garde au sol ${nf(gap, 1)} cellule${gap >= 2 ? 's' : ''}`);
     if (state.dim === '3d') res.push(g.sym ? 'Demi-modèle avec plan de symétrie (lacet nul).' : 'Modèle complet (lacet non nul).');
     res.push(`Taux de blocage ${nf((tunnel.blockage || 0) * 100, 1)} % (veine à frontières ouvertes).`);
+    if (tunnel.useActuators) res.push('Ailerons : modèle de profil couplé à l\'écoulement calculé (polaire d\'aile multi-éléments, incidence de réglage, vitesse et angle d\'attaque locaux).');
     if (gap < 2 && state.plane !== 'top') res.push('<b style="color:var(--warn)">Soubassement non résolu</b> : l\'effet de sol est sous-estimé. Augmentez la finesse dans « Avancé ».');
     if (state.rotatingWheels && rCells < 6 && state.plane !== 'top') res.push(`Roues : ${nf(rCells, 1)} cellules par rayon, rotation non imposée sous 6 cellules (roues fixes).`);
   }

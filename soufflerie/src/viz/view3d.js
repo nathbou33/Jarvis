@@ -83,6 +83,8 @@ export class View3D {
     this.scene.add(this.domainBox);
     this.inlet = this._grillePlane(0x7fb6ff);
     this.scene.add(this.inlet);
+    this.hall = this._tunnelHall();
+    this.scene.add(this.hall);
 
     this.carRoot = new THREE.Group();
     this.scene.add(this.carRoot);
@@ -94,6 +96,54 @@ export class View3D {
     };
     this.wheelAngle = 0;
     this.beltOffset = 0;
+  }
+
+  // Veine d'essai : parois en panneaux, bandeaux lumineux au plafond, buse d'entrée.
+  // Matériau en face arrière : seules les parois situées derrière la voiture sont dessinées.
+  _tunnelHall() {
+    const cv = document.createElement('canvas');
+    cv.width = 512; cv.height = 256;
+    const c = cv.getContext('2d');
+    c.fillStyle = '#151a21';
+    c.fillRect(0, 0, 512, 256);
+    c.strokeStyle = '#0c1015';
+    c.lineWidth = 3;
+    for (let x = 0; x <= 512; x += 64) { c.beginPath(); c.moveTo(x, 0); c.lineTo(x, 256); c.stroke(); }
+    c.beginPath(); c.moveTo(0, 128); c.lineTo(512, 128); c.stroke();
+    c.fillStyle = '#1b2129';
+    for (let x = 6; x < 512; x += 64) c.fillRect(x, 6, 52, 116);
+    const tex = new THREE.CanvasTexture(cv);
+    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+    tex.colorSpace = THREE.SRGBColorSpace;
+    const em = document.createElement('canvas');
+    em.width = 512; em.height = 256;
+    const e = em.getContext('2d');
+    e.fillStyle = '#000';
+    e.fillRect(0, 0, 512, 256);
+    e.fillStyle = '#9fc7ff';
+    e.fillRect(0, 238, 512, 6); // bandeau lumineux en haut de paroi
+    const emTex = new THREE.CanvasTexture(em);
+    emTex.wrapS = emTex.wrapT = THREE.RepeatWrapping;
+    const wall = new THREE.MeshStandardMaterial({ map: tex, emissive: 0xffffff, emissiveMap: emTex, emissiveIntensity: 0.55, roughness: 0.85, side: THREE.BackSide });
+    const end = new THREE.MeshStandardMaterial({ color: 0x10141a, roughness: 0.9, side: THREE.BackSide });
+    // plafond : deux rampes lumineuses dans l'axe de la veine
+    const cc = document.createElement('canvas');
+    cc.width = 64; cc.height = 256;
+    const g2 = cc.getContext('2d');
+    g2.fillStyle = '#000';
+    g2.fillRect(0, 0, 64, 256);
+    g2.fillStyle = '#cfe2ff';
+    g2.fillRect(0, 70, 64, 8);
+    g2.fillRect(0, 178, 64, 8);
+    const ceilTex = new THREE.CanvasTexture(cc);
+    ceilTex.wrapS = THREE.RepeatWrapping;
+    const ceil = new THREE.MeshStandardMaterial({ color: 0x12161c, emissive: 0xffffff, emissiveMap: ceilTex, emissiveIntensity: 0.7, roughness: 0.9, side: THREE.BackSide });
+    const none = new THREE.MeshBasicMaterial({ visible: false });
+    const hall = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), [end, end, ceil, none, wall, wall]);
+    hall.receiveShadow = true;
+    hall.renderOrder = -1;
+    this.hallTex = [tex, emTex];
+    return hall;
   }
 
   _grillePlane(color) {
@@ -137,6 +187,11 @@ export class View3D {
     this.domainBox.position.set(g.x0 + W / 2, H / 2, zc);
     this.inlet.scale.set(D, H, 1);
     this.inlet.position.set(g.x0, H / 2, zc);
+    // veine : un peu plus large et plus haute que le domaine de calcul
+    const HL = Math.max(H * 1.25, 2.6), DL = Math.max(D * 1.15, 5), WL = W * 1.08;
+    this.hall.scale.set(WL, HL, DL);
+    this.hall.position.set(g.x0 + W / 2, HL / 2 - 0.004, zc);
+    for (const t of this.hallTex) t.repeat.set(WL / 4, 1);
     this.inlet.material.map.repeat.set(D / 0.25, H / 0.25);
     const car = tunnel.opts.car;
     const L = car.dims.L;
