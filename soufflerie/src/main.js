@@ -409,7 +409,11 @@ function renderEssai() {
     return slider({ label: s.label, min: s.min, max: s.max, step: s.step, value: p[s.key], unit: s.unit, format: (v) => nf(Number(v), s.step < 0.1 ? 2 : s.step < 1 ? 1 : 0), onChange: commit });
   });
   root.append(group('Réglages de la voiture', ...setupCtl,
-    el('div', { class: 'btn-row' }, el('button', { type: 'button', class: 'btn', onclick: () => { state.carParams[state.carId] = Object.fromEntries(c.setup.map((s) => [s.key, s.def])); rebuild({ newCar: true }); } }, 'Réglages d\'origine'))));
+    el('div', { class: 'btn-row' }, el('button', { type: 'button', class: 'btn', onclick: () => {
+      state.carParams[state.carId] = Object.fromEntries(c.setup.map((s) => [s.key, s.def]));
+      if (c.imported && importedModel()) state.carParams[state.carId].length = Math.round(Math.min(8, Math.max(1, importedModel().autoL)) * 100) / 100;
+      rebuild({ newCar: true });
+    } }, 'Réglages d\'origine'))));
 
   // conditions de soufflerie
   const g = tunnel.grid;
