@@ -749,7 +749,7 @@ void main() {
       const dens = this.settings.smokeDensity;
       const nPerEmitter = (this.PW * this.PH) / Math.max(1, this.pUpdate.uniforms.uNEmit.value);
       pu.uSize.value = 0.036 * Math.max(0.7, Math.min(1.5, Math.sqrt(t.grid.dx / 0.06)));
-      pu.uAlpha.value = Math.min(0.9, (this.settings.smoke === 'wand' ? 0.14 : 0.3) * dens * Math.sqrt(1500 / nPerEmitter + 0.15));
+      pu.uAlpha.value = Math.min(0.9, (this.settings.smoke === 'wand' ? 0.14 : 0.3) * dens * Math.sqrt(700 / nPerEmitter + 0.15));
       pu.uColorMode.value = this.settings.smokeColor === 'speed' ? 1 : 0;
       this.points.visible = this.settings.smoke !== 'off';
     }
