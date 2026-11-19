@@ -11,6 +11,7 @@ const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x30343b);
 const pm = new THREE.PMREMGenerator(renderer);
 scene.environment = pm.fromScene(new RoomEnvironment(), 0.04).texture;
+scene.environmentIntensity = 0.55;
 const dl = new THREE.DirectionalLight(0xffffff, 1.5); dl.position.set(3, 6, 4); scene.add(dl);
 const floor = new THREE.Mesh(new THREE.PlaneGeometry(40, 40), new THREE.MeshStandardMaterial({ color: 0x55595f, roughness: 0.9 }));
 floor.rotation.x = -Math.PI / 2; floor.position.y = -0.001; scene.add(floor);

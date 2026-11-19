@@ -227,8 +227,9 @@ export function blade(a, b, chord, thick, seg = 10) {
 }
 
 // Matériau composite : tissage carbone procédural (sergé 2/2) modulant la couleur.
-export function carbonMaterial({ color = 0x1a1c20, vertexColors = false, scale = 70, clearcoat = 0.9 } = {}) {
-  const mat = new THREE.MeshPhysicalMaterial({ color, vertexColors, metalness: 0.25, roughness: 0.42, clearcoat, clearcoatRoughness: 0.12 });
+export function carbonMaterial({ color = 0x16171b, vertexColors = false, scale = 70, clearcoat = 0.7 } = {}) {
+  // carbon verni : sombre, reflets nets mais atténués (sinon les grandes surfaces paraissent grises)
+  const mat = new THREE.MeshPhysicalMaterial({ color, vertexColors, metalness: 0.1, roughness: 0.46, clearcoat, clearcoatRoughness: 0.2, specularIntensity: 0.55 });
   mat.onBeforeCompile = (sh) => {
     sh.vertexShader = sh.vertexShader
       .replace('#include <common>', '#include <common>\nvarying vec3 vCP;\nvarying vec3 vCN;')
@@ -412,12 +413,25 @@ export function wheelVisual({ R, B, rimR, style = 'road', rimColor = 0x2a2d33, t
   tireG.rotateX(Math.PI / 2);
   const tire = new THREE.Mesh(tireG, new THREE.MeshPhysicalMaterial({ color: tireColor, roughness: 0.82, metalness: 0.0, sheen: 0.3, sheenColor: new THREE.Color(0x30343a) }));
   spin.add(tire);
-  // marquages de flanc : anneau de couleur (gomme) ou liseré
-  const ringMat = new THREE.MeshBasicMaterial({ color: style === 'f1' ? compound : 0x4a4f58, side: THREE.DoubleSide, transparent: true, opacity: style === 'f1' ? 0.92 : 0.45 });
-  const r0 = style === 'f1' ? R * 0.83 : R * 0.9, r1 = style === 'f1' ? R * 0.855 : R * 0.915;
+  // marquages de flanc : inscriptions en relief (texture) et bande de couleur de gomme
+  const sideTex = tyreSidewallTexture(style, compound);
+  const ringMat = new THREE.MeshStandardMaterial({ map: sideTex, transparent: true, roughness: 0.75, metalness: 0, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2 });
+  const rIn = rimR * 1.04, rOut = R * 0.985;
+  // anneau qui épouse le flanc (même profil que le pneu, décalé de 2 mm)
+  const ringG = new THREE.RingGeometry(rIn, rOut, 120, 8);
+  const zSide = (r) => {
+    const rs = R - shoulder;
+    if (r <= rs) return sw * (0.9 + 0.1 * Math.max(0, (r - rimR * 1.02) / (rs - rimR * 1.02)));
+    const a = Math.acos(Math.min(1, (r - rs) / shoulder));
+    return sw * Math.sin(a) * (1 + 0.03 * Math.cos(a));
+  };
+  const rp = ringG.getAttribute('position');
+  for (let i = 0; i < rp.count; i++) rp.setZ(i, zSide(Math.hypot(rp.getX(i), rp.getY(i))) + 0.002);
+  ringG.computeVertexNormals();
   for (const sgn of [-1, 1]) {
-    const ring = new THREE.Mesh(new THREE.RingGeometry(r0, r1, 72), ringMat);
-    ring.position.z = sgn * sw * 1.012;
+    const ring = new THREE.Mesh(ringG, ringMat);
+    if (sgn < 0) ring.rotation.y = Math.PI; // lisible des deux côtés
+    ring.renderOrder = 1;
     spin.add(ring);
   }
   const rimMat = new THREE.MeshPhysicalMaterial({ color: rimColor, metalness: style === 'road' ? 0.85 : 0.6, roughness: style === 'road' ? 0.22 : 0.38, clearcoat: style === 'road' ? 0.6 : 0.2 });
@@ -469,7 +483,126 @@ export function wheelVisual({ R, B, rimR, style = 'road', rimColor = 0x2a2d33, t
     face.add(lip);
     spin.add(face);
   }
+  if (style === 'f1') {
+    // enjoliveur plein côté extérieur (obligatoire en F1 depuis 2022), légèrement bombé
+    const outer = -inner;
+    const prof2 = [];
+    for (let i = 0; i <= 10; i++) { const r = (rimR * 0.985 * i) / 10; prof2.push(new THREE.Vector2(r, 0.018 * (1 - (r / rimR) ** 2))); }
+    const coverG = new THREE.LatheGeometry(prof2.reverse(), 64).rotateX(outer > 0 ? Math.PI / 2 : -Math.PI / 2);
+    // UV planaires pour la décoration
+    const pos = coverG.getAttribute('position');
+    const uv = new Float32Array(pos.count * 2);
+    for (let i = 0; i < pos.count; i++) { uv[i * 2] = 0.5 + (outer > 0 ? 1 : -1) * pos.getX(i) / (2 * rimR); uv[i * 2 + 1] = 0.5 + pos.getY(i) / (2 * rimR); }
+    coverG.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+    const cover = new THREE.Mesh(coverG, new THREE.MeshPhysicalMaterial({ map: wheelCoverTexture(rimColor), metalness: 0.2, roughness: 0.4, clearcoat: 0.8, clearcoatRoughness: 0.2, side: THREE.DoubleSide }));
+    cover.position.z = outer * B * 0.41;
+    spin.add(cover);
+    const nut = new THREE.Mesh(new THREE.CylinderGeometry(rimR * 0.1, rimR * 0.1, 0.03, 6).rotateX(Math.PI / 2), new THREE.MeshPhysicalMaterial({ color: 0xff3b30, metalness: 0.6, roughness: 0.3 }));
+    nut.position.z = outer * (B * 0.41 + 0.025);
+    spin.add(nut);
+  }
   return grp;
+}
+
+// ---------------------------------------------------------------------------
+// Textures de flanc de pneu et d'enjoliveur (dessinées sur canvas, inscriptions génériques)
+const texCache = new Map();
+function arcText(ctx, text, cx, cy, r, center, px, top = true) {
+  ctx.font = `800 ${px}px "Barlow Semi Condensed", "Arial Narrow", Arial, sans-serif`;
+  const widths = [...text].map((c) => ctx.measureText(c).width * 1.08);
+  const total = widths.reduce((a, b) => a + b, 0) / r;
+  let a = top ? center - total / 2 : center + total / 2;
+  for (let i = 0; i < text.length; i++) {
+    const da = widths[i] / r;
+    const am = top ? a + da / 2 : a - da / 2;
+    ctx.save();
+    ctx.translate(cx + Math.cos(am) * r, cy + Math.sin(am) * r);
+    ctx.rotate(top ? am + Math.PI / 2 : am - Math.PI / 2);
+    ctx.fillText(text[i], 0, 0);
+    ctx.restore();
+    a = top ? a + da : a - da;
+  }
+}
+
+export function tyreSidewallTexture(style, compound) {
+  const key = `tyre-${style}-${compound}`;
+  if (texCache.has(key)) return texCache.get(key);
+  if (typeof document === 'undefined') return null;
+  const S = 1024, c = document.createElement('canvas');
+  c.width = c.height = S;
+  const ctx = c.getContext('2d');
+  const C = S / 2;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  const col = '#' + new THREE.Color(compound).getHexString();
+  if (style === 'f1') {
+    // bande de gomme : deux arcs épais et un filet continu
+    ctx.lineWidth = 12;
+    ctx.strokeStyle = col;
+    ctx.beginPath(); ctx.arc(C, C, C * 0.86, 0, Math.PI * 2); ctx.stroke();
+    ctx.lineWidth = 30;
+    for (const a0 of [-0.35, Math.PI - 0.35]) { ctx.beginPath(); ctx.arc(C, C, C * 0.8, a0 - 0.55, a0 + 0.55); ctx.stroke(); }
+    ctx.fillStyle = '#f4f6f8';
+    arcText(ctx, 'SOUFFLERIE', C, C, C * 0.8, -Math.PI / 2, 74, true);
+    arcText(ctx, 'SOUFFLERIE', C, C, C * 0.8, Math.PI / 2, 74, false);
+    ctx.fillStyle = col;
+    arcText(ctx, 'AÉRO 18', C, C, C * 0.79, 0, 46, true);
+    arcText(ctx, 'AÉRO 18', C, C, C * 0.79, Math.PI, 46, true);
+  } else {
+    ctx.fillStyle = style === 'hyper' ? 'rgba(240,242,245,0.85)' : 'rgba(150,156,166,0.55)';
+    const ring = style === 'hyper' ? 0.84 : 0.86;
+    arcText(ctx, style === 'hyper' ? 'SOUFFLERIE  ENDURANCE' : 'SOUFFLERIE', C, C, C * ring, -Math.PI / 2, style === 'hyper' ? 52 : 46, true);
+    arcText(ctx, style === 'hyper' ? '31/71 R18' : '225/45 R17  91W', C, C, C * ring, Math.PI / 2, 34, false);
+    ctx.strokeStyle = 'rgba(120,126,136,0.35)';
+    ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.arc(C, C, C * 0.95, 0, Math.PI * 2); ctx.stroke();
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = 4;
+  texCache.set(key, t);
+  return t;
+}
+
+export function wheelCoverTexture(rimColor) {
+  const key = `cover-${rimColor}`;
+  if (texCache.has(key)) return texCache.get(key);
+  if (typeof document === 'undefined') return null;
+  const S = 512, c = document.createElement('canvas');
+  c.width = c.height = S;
+  const ctx = c.getContext('2d');
+  const C = S / 2;
+  const g = ctx.createRadialGradient(C, C, 10, C, C, C);
+  g.addColorStop(0, '#24272d');
+  g.addColorStop(1, '#101114');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, S, S);
+  // anneau de couleur et chevrons tournants (montrent la rotation)
+  ctx.strokeStyle = '#1e88ff';
+  ctx.lineWidth = 14;
+  ctx.beginPath(); ctx.arc(C, C, C * 0.86, 0, Math.PI * 2); ctx.stroke();
+  ctx.fillStyle = '#1e88ff';
+  for (let k = 0; k < 3; k++) {
+    const a = (k * 2 * Math.PI) / 3;
+    ctx.beginPath();
+    ctx.moveTo(C + Math.cos(a - 0.25) * C * 0.42, C + Math.sin(a - 0.25) * C * 0.42);
+    ctx.lineTo(C + Math.cos(a - 0.05) * C * 0.8, C + Math.sin(a - 0.05) * C * 0.8);
+    ctx.lineTo(C + Math.cos(a + 0.18) * C * 0.8, C + Math.sin(a + 0.18) * C * 0.8);
+    ctx.lineTo(C + Math.cos(a - 0.02) * C * 0.42, C + Math.sin(a - 0.02) * C * 0.42);
+    ctx.closePath();
+    ctx.fill();
+  }
+  ctx.fillStyle = '#e8ecf1';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  arcText(ctx, 'AÉROLAB', C, C, C * 0.66, -Math.PI / 2, 44, true);
+  ctx.fillStyle = '#2f343c';
+  ctx.beginPath(); ctx.arc(C, C, C * 0.24, 0, Math.PI * 2); ctx.fill();
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = 4;
+  texCache.set(key, t);
+  return t;
 }
 
 export function cylinderZ(R, B, cx, cy, cz, seg = 28) {

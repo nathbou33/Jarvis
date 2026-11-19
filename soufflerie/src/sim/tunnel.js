@@ -4,6 +4,7 @@ import * as THREE from 'three';
 import { LBM, WHEEL_CAT0 } from './lbm.js';
 import { D2Q9, D3Q19 } from './lattice.js';
 import { trianglesOf, voxelize3D, voxelizeSection, voxelizeSilhouette, projectedArea } from '../geometry/voxelize.js';
+import { buildSDF, meshTriangles } from '../geometry/sdf.js';
 
 // --- Air (atmosphère standard + loi de Sutherland) ---
 export function airProps(tempC, altitude) {
@@ -63,7 +64,8 @@ export class Tunnel {
     const solids = car.solids.filter((s) => !(sectionCut && s.noSection) && !(dropDetails && s.detail)).map((s) => {
       const m = new THREE.Matrix4().copy(this.yawMatrix);
       if (s.matrix) m.multiply(s.matrix);
-      return { tris: trianglesOf(s.geometry, m), cat: s.cat, thin: s.thin, priority: s.priority, actuator: !!s.actuator };
+      const tris = s.prebaked ? transformTris(s.tris, m) : trianglesOf(s.geometry, m);
+      return { tris, cat: s.cat, thin: s.thin, priority: s.priority, actuator: !!s.actuator };
     });
     this.solids = this.useActuators ? solids.filter((s) => !s.actuator) : solids;
     const box = new THREE.Box3();
@@ -118,7 +120,8 @@ export class Tunnel {
     // Voxelisation
     let cat;
     const vs = this.solids;
-    if (opts.mode === '3d') cat = voxelize3D(vs, grid);
+    if (car.occupancy) cat = this._voxelizeOccupancy(car.occupancy, grid, opts);
+    else if (opts.mode === '3d') cat = voxelize3D(vs, grid);
     else if (opts.mode === 'side') {
       if (opts.silhouette) cat = voxelizeSilhouette(vs, grid, box.min.z, box.max.z, Math.min(grid.dx, 0.02));
       else cat = voxelizeSection(vs, grid, 'side', opts.section ?? 0);
@@ -149,6 +152,24 @@ export class Tunnel {
       });
       this.layoutKey = this._layoutKey(opts);
     }
+    // champ de distance fin de la forme visible (fumée 3D : contourne ailerons et petites pièces)
+    if (opts.mode === '3d') {
+      const key = `${this._geomKey(opts)}|${!!grid.sym}`;
+      if (this.sdfKey !== key || !this.sdf) {
+        const t0 = performance.now();
+        const tris = meshTriangles(car.group, this.yawMatrix);
+        const vb = new THREE.Box3();
+        const v = new THREE.Vector3();
+        for (const tr of tris) for (let i = 0; i < tr.length; i += 3) vb.expandByPoint(v.set(tr[i], tr[i + 1], tr[i + 2]));
+        this.sdf = buildSDF(tris, vb, { sym: !!grid.sym, maxDim: Math.min(512, this.gpu.max3D || 256) });
+        this.sdf.ms = performance.now() - t0;
+        this.sdf.version = (this.sdfVersion = (this.sdfVersion || 0) + 1);
+        this.sdfKey = key;
+      }
+    } else {
+      this.sdf = null;
+      this.sdfKey = null;
+    }
     this.sim.setSolid(cat, this._latticeWheels());
     this._buildActuators();
     this.applyFlow();
@@ -157,11 +178,49 @@ export class Tunnel {
     return { rebuilt: !keep };
   }
 
+  // Modèle importé : échantillonnage de la grille d'occupation fine (maillages non fermés acceptés)
+  _voxelizeOccupancy(occ, grid, opts) {
+    const inv = this.yawMatrix.clone().invert();
+    const e = inv.elements;
+    const smp = (x, y, z) => occ.sample(e[0] * x + e[4] * y + e[8] * z + e[12], e[1] * x + e[5] * y + e[9] * z + e[13], e[2] * x + e[6] * y + e[10] * z + e[14]);
+    const { nx, ny, nz = 1, x0, y0, z0, dx } = grid;
+    const q = dx / 4;
+    const cell = (x, y, z, dims) => {
+      if (smp(x, y, z)) return 1;
+      // pièces plus fines que la cellule : au moins 3 des 8 sous-points (ou 2 sur 4 en 2D)
+      let n = 0;
+      if (dims === 3) { for (const a of [-q, q]) for (const b of [-q, q]) for (const c of [-q, q]) n += smp(x + a, y + b, z + c); return n >= 3 ? 1 : 0; }
+      if (dims === 2) { for (const a of [-q, q]) for (const b of [-q, q]) n += smp(x + a, y + b, z); return n >= 2 ? 1 : 0; }
+      for (const a of [-q, q]) for (const b of [-q, q]) n += smp(x + a, y, z + b);
+      return n >= 2 ? 1 : 0;
+    };
+    const cat = new Uint8Array(nx * ny * nz);
+    if (opts.mode === '3d') {
+      for (let k = 0; k < nz; k++) for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
+        cat[i + nx * (j + ny * k)] = cell(x0 + (i + 0.5) * dx, y0 + (j + 0.5) * dx, z0 + (k + 0.5) * dx, 3);
+      }
+    } else if (opts.mode === 'side' && opts.silhouette) {
+      // silhouette : union sur toute la largeur
+      for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
+        let hit = 0;
+        for (let z = occ.z0 + occ.h / 2; z < occ.z0 + occ.nz * occ.h && !hit; z += occ.h) hit = smp(x0 + (i + 0.5) * dx, y0 + (j + 0.5) * dx, z);
+        cat[i + nx * j] = hit;
+      }
+    } else if (opts.mode === 'side') {
+      const zs = opts.section ?? 0;
+      for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) cat[i + nx * j] = cell(x0 + (i + 0.5) * dx, y0 + (j + 0.5) * dx, zs, 2);
+    } else {
+      const ys = opts.section ?? 0.3;
+      for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) cat[i + nx * j] = cell(x0 + (i + 0.5) * dx, ys, y0 + (j + 0.5) * dx, 1);
+    }
+    return cat;
+  }
+
   _layoutKey(o) {
     return [o.car.id, o.mode, o.quality, o.mode === 'side' ? 0 : o.yaw, o.mode === '3d' ? !o.yaw : 0].join('|');
   }
   _geomKey(o) {
-    return [o.car.id, o.yaw, JSON.stringify(o.carParams || {})].join('|');
+    return [o.car.id, o.car.importInfo?.serial ?? '', o.yaw, JSON.stringify(o.carParams || {})].join('|');
   }
 
   get wheelsResolved() {
@@ -521,4 +580,16 @@ export class Tunnel {
     if (this.sim) this.sim.dispose();
     this.sim = null;
   }
+}
+
+function transformTris(src, m) {
+  const out = new Float32Array(src.length);
+  const e = m.elements;
+  for (let i = 0; i < src.length; i += 3) {
+    const x = src[i], y = src[i + 1], z = src[i + 2];
+    out[i] = e[0] * x + e[4] * y + e[8] * z + e[12];
+    out[i + 1] = e[1] * x + e[5] * y + e[9] * z + e[13];
+    out[i + 2] = e[2] * x + e[6] * y + e[10] * z + e[14];
+  }
+  return out;
 }

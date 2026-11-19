@@ -11,6 +11,6 @@ export default defineConfig({
     },
   },
   resolve: { dedupe: ['three'] },
-  optimizeDeps: { include: ['three', 'three/addons/controls/OrbitControls.js', 'three/addons/environments/RoomEnvironment.js'] },
+  optimizeDeps: { include: ['three', 'three/addons/controls/OrbitControls.js', 'three/addons/environments/RoomEnvironment.js', 'three/addons/loaders/GLTFLoader.js', 'three/addons/loaders/STLLoader.js', 'three/addons/loaders/OBJLoader.js'] },
   server: { host: '127.0.0.1', port: 5173 },
 });

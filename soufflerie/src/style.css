@@ -116,6 +116,7 @@ button { cursor: pointer; }
   min-height: 0;
 }
 .viewport { position: relative; min-width: 0; min-height: 0; overflow: hidden; background: #070a0e; touch-action: none; }
+.viewport.drop::after { content: 'Déposez votre modèle 3D (GLB, glTF, STL, OBJ)'; position: absolute; inset: 12px; display: grid; place-items: center; border: 2px dashed var(--accent); border-radius: 14px; background: rgba(7, 10, 14, 0.72); color: var(--accent); font-weight: 600; font-size: 15px; pointer-events: none; z-index: 30; }
 #gl, #overlay { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
 #overlay { pointer-events: none; }
 
@@ -277,6 +278,8 @@ details.adv > .inner { padding: 4px 12px 14px; display: flex; flex-direction: co
 .car-card { display: grid; grid-template-columns: 1fr auto; gap: 2px 12px; padding: 12px; border-radius: 10px; background: var(--panel-2); border: 1px solid var(--line); }
 .car-card h3 { margin: 0; font-size: 16px; font-weight: 700; }
 .car-card p { margin: 0; grid-column: 1 / -1; color: var(--ink-3); font-size: 13px; }
+.car-card h3 { overflow-wrap: anywhere; }
+.car-card .btn-row { grid-column: 1 / -1; margin-top: 8px; }
 .car-card .dims { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 6px; font: 500 12px var(--font-num); color: var(--ink-2); }
 .car-card .dims span b { color: var(--ink-3); font-weight: 500; margin-right: 4px; font-family: var(--font-label); letter-spacing: 0.05em; text-transform: uppercase; font-size: 11px; }
 

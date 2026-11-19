@@ -41,9 +41,18 @@ ${live}
     </ul>
   </li>
 </ul>
+<h3>Importer son propre modèle</h3>
+<ul>
+  <li><b>Formats</b> : GLB (recommandé), glTF à fichier unique, STL (binaire ou texte) et OBJ. Bouton « Importer » ou glisser-déposer le fichier sur la vue.</li>
+  <li><b>Orientation</b> : la longueur est la plus grande dimension ; le haut suit la convention du format (Y pour glTF et OBJ, Z pour STL). L'avant est deviné (habitacle ou aileron en arrière du milieu) et réglable : « Inverser avant / arrière », « Retourner ».</li>
+  <li><b>Échelle</b> : l'unité est déduite de la taille (mètres, centimètres, millimètres, pouces) ; la longueur réelle se règle ensuite. La voiture est posée sur le sol et centrée.</li>
+  <li><b>Voxelisation robuste</b> : les modèles téléchargés sont rarement fermés. La surface est marquée sur une grille fine selon les trois axes, l'extérieur est rempli depuis les bords, et tout ce qui n'est pas atteint est solide : un habitacle ouvert ou un trou de quelques millimètres ne fausse pas le calcul.</li>
+  <li><b>Limites</b> : les roues ne tournent pas, les efforts sont donnés pour la voiture entière (pas de ventilation par composant), et l'empattement servant à l'équilibre est estimé à 60 % de la longueur. À lacet nul, la 3D utilise la moitié gauche du modèle (plan de symétrie).</li>
+</ul>
 <h3>Lecture des visualisations</h3>
 <ul>
-  <li><b>Fumée</b> : traceur passif lâché en amont, comme en soufflerie réelle (lignes d'émission). En 3D, des particules sont transportées par le champ de vitesse calculé ; le mode « multi-flux » lâche plusieurs peignes répartis sur la largeur et un flux au ras du sol pour suivre le soubassement.</li>
+  <li><b>Fumée</b> : traceur passif lâché en amont, comme en soufflerie réelle (lignes d'émission). En 3D, jusqu'à 260 000 particules sont transportées par le champ de vitesse calculé ; le mode « multi-flux » lâche une nappe d'environ 150 filets (250 en modèle complet) répartis sur toute la largeur et la hauteur, plus un rang au ras du sol pour suivre le soubassement.</li>
+  <li><b>Contact fumée-carrosserie</b> : la fumée glisse sur la forme réelle de la voiture. Un champ de distance fin (1,5 à 3 cm) est calculé sur toutes les pièces visibles, ailerons et petites pièces compris ; une particule qui l'atteint est replacée sur la paroi, le long de laquelle elle continue. Les pas de transport sont assez courts pour ne jamais sauter par-dessus une pièce mince. La fumée ne traverse donc pas la carrosserie, même là où la grille de calcul est plus grossière que la voiture.</li>
   <li><b>Pertes de pression totale</b> : 1 − Cp<sub>0</sub> ; le sillage et les tourbillons apparaissent nettement.</li>
   <li><b>Plan de coupe transversal</b> derrière la voiture : équivalent d'un sondage de sillage, idéal pour voir les tourbillons de bout d'aileron et des roues.</li>
   <li><b>Ralenti</b> : la fumée et les roues tournent au ralenti, à une vitesse cohérente entre elles ; le temps physique simulé est indiqué dans la barre d'état.</li>

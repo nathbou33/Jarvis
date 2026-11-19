@@ -6,7 +6,9 @@ Elle s'installe comme une application (PWA) sur téléphone, tablette et ordinat
 
 ## Ce que fait l'application
 
-- **Deux souffleries** : 3D (D3Q19) avec fumée multi-flux en particules, plan de coupe et pression pariétale ; 2D (D2Q9) haute résolution avec fumée par peigne, coupe longitudinale, silhouette ou vue de dessus.
+- **Deux souffleries** : 3D (D3Q19) avec fumée multi-flux en particules (nappe d'environ 150 filets, jusqu'à 260 000 particules), plan de coupe et pression pariétale ; 2D (D2Q9) haute résolution avec fumée par peigne, coupe longitudinale, silhouette ou vue de dessus.
+- **Fumée qui épouse la carrosserie** : un champ de distance fin (1,5 à 3 cm) calculé sur toutes les pièces visibles fait glisser la fumée sur la vraie forme de la voiture, ailerons compris.
+- **Import de votre propre modèle 3D** : GLB, glTF, STL ou OBJ, par bouton ou glisser-déposer ; orientation, unité et mise au sol automatiques, voxelisation robuste aux maillages non fermés.
 - **Réglages** : vitesse du vent (20 à 400 km/h), lacet (plateau tournant), sol roulant, roues en rotation, température, altitude, turbulence d'entrée, finesse du maillage.
 - **Réglages voiture** : incidences d'ailerons, aéro active 2026 en mode virage / ligne droite (F1), canards (Hypercar), becquet et rétroviseurs (citadine), hauteurs de caisse avant/arrière.
 - **Mesures** : traînée, appui ou portance (N et kg), Cx, Cz, SCx, SCz, finesse, équilibre avant/arrière, puissance absorbée, force latérale, répartition par composant (carrosserie, fond plat, ailerons, roues), historique et convergence.
@@ -48,7 +50,7 @@ Navigateur avec WebGL 2 et rendu flottant (`EXT_color_buffer_float`) : Chrome, E
 |---|---|
 | `src/sim/lbm.js` | Solveur LBM générique (D2Q9 / D3Q19), shaders générés, collision régularisée + Smagorinsky, efforts par échange de quantité de mouvement |
 | `src/sim/tunnel.js` | Domaine, voxelisation, unités physiques ↔ réseau, dépouillement des efforts, moyennes et convergence |
-| `src/geometry/` | Modèles procéduraux des trois voitures (maillages fermés), voxelisation par lancer de rayons, livrées |
+| `src/geometry/` | Modèles procéduraux des trois voitures (maillages fermés), voxelisation par lancer de rayons, livrées, champ de distance de la fumée (`sdf.js`), import de modèles (`importer.js`) |
 | `src/viz/` | Vue 2D (fumée advectée, champs, lignes de courant) et vue 3D (particules, plan de coupe, Cp pariétal) |
 | `src/ui/` | Contrôles, graphiques, fiche méthode |
 | `tests/` | Pages de validation (cylindre à Re = 100, rendu des voitures, convergence des efforts) |

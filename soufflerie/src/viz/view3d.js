@@ -5,6 +5,8 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { COLORMAPS, atlasSampler } from './glsl.js';
 
+const MAX_EMIT = 256; // nombre maximal de filets de fumée
+
 export const SMOKE_MODES = [
   { id: 'multi', label: 'Multi-flux' },
   { id: 'rake-v', label: 'Peigne vertical' },
@@ -266,15 +268,31 @@ void main() {
     // particules
     const PW = 256, PH = this.particleRows();
     this.PW = PW; this.PH = PH;
+    // positions des émetteurs (jusqu'à MAX_EMIT peignes de fumée)
+    if (!this.emitTex) {
+      this.emitData = new Float32Array(MAX_EMIT * 4);
+      this.emitTex = new THREE.DataTexture(this.emitData, MAX_EMIT, 1, THREE.RGBAFormat, THREE.FloatType);
+      this.emitTex.minFilter = this.emitTex.magFilter = THREE.NearestFilter;
+      this.emitTex.needsUpdate = true;
+    }
     this.pState = [this.gpu.target(PW, PH, 1), this.gpu.target(PW, PH, 1)];
     this.pIdx = 0;
     this.pUpdate = this.gpu.material(`precision highp float; precision highp int; precision highp sampler2D;
 ${sampler}
+precision highp sampler3D;
 uniform sampler2D uState;
 uniform sampler2D uMacro;
-uniform sampler2D uSolid;
-uniform vec3 uEmit[64];
+uniform sampler2D uEmitTex;
 uniform int uNEmit;
+uniform sampler3D uSdf;
+uniform int uSdfOn;
+uniform vec3 uSdfMin;
+uniform vec3 uSdfInv;
+uniform vec3 uSdfTexel;
+uniform float uSdfMargin;
+uniform float uSdfKill;
+uniform vec3 uOrigin;
+uniform float uDx;
 uniform float uDt;
 uniform float uSteps;
 uniform float uMaxAge;
@@ -284,6 +302,8 @@ uniform float uSeed;
 uniform bool uSym;
 out vec4 o;
 float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7)) + uSeed) * 43758.5453); }
+vec3 emitPos(int e) { return texelFetch(uEmitTex, ivec2(e, 0), 0).xyz; }
+float sdfAt(vec3 tc) { return texture(uSdf, tc).r; }
 void main() {
   ivec2 pix = ivec2(gl_FragCoord.xy);
   int id = pix.y * ${PW} + pix.x;
@@ -294,18 +314,18 @@ void main() {
   if (uReset == 1) {
     // naissances échelonnées → filets continus dès le départ
     float delay = float(slot) / float(max(perE, 1)) * uMaxAge;
-    o = vec4(uEmit[e], -delay);
+    o = vec4(emitPos(e), -delay);
     return;
   }
   float age = s.w + uSteps;
   vec3 p = s.xyz;
-  if (age < 0.0) { o = vec4(uEmit[e], age); return; }
+  if (age < 0.0) { o = vec4(emitPos(e), age); return; }
   bool reborn = s.w < 0.0 && age >= 0.0;
   float ulb = uDt / max(uSteps, 1e-6);
   if (reborn) {
     vec2 r = vec2(hash(vec2(float(id), age)), hash(vec2(age, float(id) * 1.7)));
     float a = r.x * 6.2831853, rad = sqrt(r.y) * uJitter;
-    p = uEmit[e] + vec3(0.0, cos(a) * rad, sin(a) * rad);
+    p = emitPos(e) + vec3(0.0, cos(a) * rad, sin(a) * rad);
     // particule née au cours du sous-pas : avance de l'âge excédentaire (filets continus)
     p += asample(uMacro, p).xyz * ulb * age;
     o = vec4(p, age);
@@ -315,21 +335,45 @@ void main() {
   vec3 u2 = asample(uMacro, p + 0.5 * u1).xyz * uDt;
   p += u2;
   if (uSym) p.z = abs(p.z);
-  bool dead = age > uMaxAge || p.x < 0.0 || p.x > float(ANX) - 1.0 || p.y < 0.3 || p.y > float(ANY) || p.z < (uSym ? -1.0 : 0.0) || p.z > float(ANZ)
-    || afetch(uSolid, ivec3(floor(p))).r > 0.5 || (age > 40.0 && length(u2) < 0.0004 * uSteps);
+  // contact avec la forme réelle de la voiture : la fumée glisse le long de la paroi
+  bool inside = false;
+  if (uSdfOn == 1) {
+    vec3 w = uOrigin + p * uDx;
+    vec3 tc = (w - uSdfMin) * uSdfInv;
+    if (all(greaterThan(tc, uSdfTexel)) && all(lessThan(tc, 1.0 - uSdfTexel))) {
+      float d = sdfAt(tc);
+      if (d < uSdfMargin) {
+        vec3 gr = vec3(sdfAt(tc + vec3(uSdfTexel.x, 0.0, 0.0)) - sdfAt(tc - vec3(uSdfTexel.x, 0.0, 0.0)),
+                       sdfAt(tc + vec3(0.0, uSdfTexel.y, 0.0)) - sdfAt(tc - vec3(0.0, uSdfTexel.y, 0.0)),
+                       sdfAt(tc + vec3(0.0, 0.0, uSdfTexel.z)) - sdfAt(tc - vec3(0.0, 0.0, uSdfTexel.z)));
+        float gl = length(gr);
+        if (d < uSdfKill || gl < 1e-6) inside = true;
+        else {
+          w += gr / gl * (uSdfMargin - d);
+          p = (w - uOrigin) / uDx;
+          if (uSym) p.z = abs(p.z);
+        }
+      }
+    }
+  }
+  bool dead = inside || age > uMaxAge || p.x < 0.0 || p.x > float(ANX) - 1.0 || p.y < 0.3 || p.y > float(ANY) || p.z < (uSym ? -1.0 : 0.0) || p.z > float(ANZ)
+    || (age > 40.0 && length(u2) < 0.0004 * uSteps);
   if (dead) {
     vec2 r = vec2(hash(vec2(float(id), age + 3.1)), hash(vec2(age * 0.37, float(id))));
     float a = r.x * 6.2831853, rad = sqrt(r.y) * uJitter;
     float ex = age > uMaxAge ? clamp(age - uMaxAge, 0.0, uSteps) : 0.0;
-    vec3 q = uEmit[e] + vec3(0.0, cos(a) * rad, sin(a) * rad);
+    vec3 q = emitPos(e) + vec3(0.0, cos(a) * rad, sin(a) * rad);
     q += asample(uMacro, q).xyz * ulb * ex;
     o = vec4(q, ex);
     return;
   }
   o = vec4(p, age);
 }`, {
-      uState: { value: null }, uMacro: { value: null }, uSolid: { value: null },
-      uEmit: { value: Array.from({ length: 64 }, () => new THREE.Vector3()) }, uNEmit: { value: 1 },
+      uState: { value: null }, uMacro: { value: null },
+      uEmitTex: { value: this.emitTex }, uNEmit: { value: 1 },
+      uSdf: { value: this.sdfTex || this._dummySdf() }, uSdfOn: { value: 0 }, uSdfMin: { value: new THREE.Vector3() }, uSdfInv: { value: new THREE.Vector3(1, 1, 1) },
+      uSdfTexel: { value: new THREE.Vector3(0.01, 0.01, 0.01) }, uSdfMargin: { value: 0.012 }, uSdfKill: { value: -0.05 },
+      uOrigin: { value: new THREE.Vector3() }, uDx: { value: 0.05 },
       uDt: { value: 1 }, uSteps: { value: 1 }, uMaxAge: { value: 1000 }, uJitter: { value: 0.3 }, uReset: { value: 1 }, uSeed: { value: 0 }, uSym: { value: false },
     });
 
@@ -474,20 +518,58 @@ void main() {
 
   particleRows() {
     const q = this.tunnel?.opts?.quality;
-    return q === 'low' ? 192 : q === 'high' || q === 'ultra' ? 384 : 256;
+    return q === 'low' ? 256 : q === 'high' || q === 'ultra' ? 512 : 384;
   }
 
   _updateUniforms() {
     const t = this.tunnel;
     const g = t.grid;
     const origin = new THREE.Vector3(g.x0, g.y0, g.z0);
-    for (const m of [this.pMat, this.sliceMat, this.cpMat]) {
+    for (const m of [this.pMat, this.sliceMat, this.cpMat, this.pUpdate]) {
       m.uniforms.uOrigin.value.copy(origin);
       m.uniforms.uDx.value = g.dx;
     }
     this.derivedMat.uniforms.uL.value = t.Lref / g.dx;
     for (const m of [this.pMat, this.sliceMat, this.cpMat, this.pUpdate]) m.uniforms.uSym.value = !!g.sym;
     this.points.geometry.setDrawRange(0, this.pN * (g.sym ? 2 : 1));
+    this._syncSdf();
+  }
+
+  _dummySdf() {
+    if (!this._sdfDummy) {
+      const t = new THREE.Data3DTexture(new Uint16Array([THREE.DataUtils.toHalfFloat(1)]), 1, 1, 1);
+      t.format = THREE.RedFormat; t.type = THREE.HalfFloatType; t.needsUpdate = true;
+      this._sdfDummy = t;
+    }
+    return this._sdfDummy;
+  }
+
+  // champ de distance fin (calculé par la soufflerie) → texture 3D filtrée
+  _syncSdf() {
+    const sdf = this.tunnel.sdf;
+    const u = this.pUpdate.uniforms;
+    if (!sdf) { u.uSdfOn.value = 0; return; }
+    if (this.sdfVersion !== sdf.version) {
+      if (this.sdfTex) this.sdfTex.dispose();
+      const half = new Uint16Array(sdf.data.length);
+      for (let i = 0; i < half.length; i++) half[i] = THREE.DataUtils.toHalfFloat(sdf.data[i]);
+      const t = new THREE.Data3DTexture(half, sdf.nx, sdf.ny, sdf.nz);
+      t.format = THREE.RedFormat;
+      t.type = THREE.HalfFloatType;
+      t.minFilter = t.magFilter = THREE.LinearFilter;
+      t.wrapS = t.wrapT = t.wrapR = THREE.ClampToEdgeWrapping;
+      t.unpackAlignment = 1;
+      t.needsUpdate = true;
+      this.sdfTex = t;
+      this.sdfVersion = sdf.version;
+    }
+    u.uSdf.value = this.sdfTex;
+    u.uSdfOn.value = 1;
+    u.uSdfMin.value.set(sdf.x0, sdf.y0, sdf.z0);
+    u.uSdfInv.value.set(1 / (sdf.nx * sdf.h), 1 / (sdf.ny * sdf.h), 1 / (sdf.nz * sdf.h));
+    u.uSdfTexel.value.set(1 / sdf.nx, 1 / sdf.ny, 1 / sdf.nz);
+    u.uSdfMargin.value = 0.55 * sdf.h + 0.004;
+    u.uSdfKill.value = -2.2 * sdf.h;
   }
 
   emitters() {
@@ -501,22 +583,28 @@ void main() {
     const toC = (y, z) => new THREE.Vector3(xr, (y - g.y0) / g.dx, ((g.sym ? Math.abs(z) : z) - g.z0) / g.dx);
     const span = s.rakeSpan;
     if (s.smoke === 'multi') {
-      // plusieurs peignes verticaux répartis sur la largeur + un flux au ras du sol (soubassement)
-      const lanes = g.sym ? [0, 0.35, 0.62, 0.95] : [0, 0.35, -0.35, 0.62, -0.62, 0.95, -0.95];
-      const nPer = g.sym ? 12 : 8;
-      for (const zl of lanes) for (let k = 0; k < nPer; k++) pts.push(toC(0.05 + (k / (nPer - 1)) * H * 1.12, zl * W * 0.5 * span));
-      const nLow = g.sym ? 12 : 8;
-      const yLow = Math.min(0.09, 0.06 * H + 0.02);
-      for (let k = 0; k < nLow; k++) pts.push(toC(yLow, g.sym ? ((k + 0.5) / nLow) * W * 0.5 : ((k + 0.5) / nLow - 0.5) * W));
+      // nappe de filets répartis sur toute la largeur et la hauteur + un rang au ras du sol
+      // (soubassement) : environ 150 filets en demi-modèle, 250 en modèle complet
+      const nLane = g.sym ? 10 : 19;
+      const nPer = g.sym ? 14 : 12;
+      for (let a = 0; a < nLane; a++) {
+        const f = g.sym ? (a / (nLane - 1)) * 1.04 : (a / (nLane - 1) - 0.5) * 2.08;
+        // décalage vertical d'un demi-pas une colonne sur deux : nappe en quinconce, plus homogène
+        const off = (a % 2) * 0.5;
+        for (let k = 0; k < nPer; k++) pts.push(toC(0.05 + ((k + off) / (nPer - 0.5)) * H * 1.14, f * W * 0.5 * span));
+      }
+      const nLow = 16;
+      const yLow = Math.min(0.08, 0.05 * H + 0.02);
+      for (let k = 0; k < nLow; k++) pts.push(toC(yLow, g.sym ? ((k + 0.5) / nLow) * W * 0.52 : ((k + 0.5) / nLow - 0.5) * W * 1.04));
     } else if (s.smoke === 'rake-v') {
-      const n = 15;
+      const n = 30;
       for (let k = 0; k < n; k++) pts.push(toC(0.03 + (k / (n - 1)) * H * 1.15 * span, s.rakeZ * W * 0.6));
     } else if (s.smoke === 'rake-h') {
-      const n = g.sym ? 16 : 30;
+      const n = g.sym ? 32 : 60;
       for (let k = 0; k < n; k++) pts.push(toC(s.rakeY * H * 1.2, g.sym ? ((k + 0.5) / n) * W * 0.62 * span : (k / (n - 1) - 0.5) * W * 1.25 * span));
     } else if (s.smoke === 'grid') {
-      const nb = g.sym ? 5 : 9;
-      for (let a = 0; a < 7; a++) for (let b = 0; b < nb; b++) pts.push(toC(0.04 + (a / 6) * H * 1.15, g.sym ? ((b + 0.5) / nb) * W * 0.65 : (b / 8 - 0.5) * W * 1.3));
+      const nb = g.sym ? 8 : 15, na = 10;
+      for (let a = 0; a < na; a++) for (let b = 0; b < nb; b++) pts.push(toC(0.04 + (a / (na - 1)) * H * 1.15, g.sym ? ((b + 0.5) / nb) * W * 0.65 : (b / (nb - 1) - 0.5) * W * 1.3));
     } else if (s.smoke === 'wand') {
       pts.push(toC(s.rakeY * H * 1.2, s.rakeZ * W * 0.6));
     }
@@ -527,8 +615,13 @@ void main() {
     if (!this.pUpdate) return;
     const pts = this.emitters();
     const u = this.pUpdate.uniforms;
-    for (let k = 0; k < 64; k++) u.uEmit.value[k].copy(pts[k] || pts[0] || new THREE.Vector3());
-    u.uNEmit.value = Math.max(1, pts.length);
+    const n = Math.min(MAX_EMIT, pts.length);
+    for (let k = 0; k < MAX_EMIT; k++) {
+      const q = pts[k < n ? k : 0] || new THREE.Vector3();
+      this.emitData.set([q.x, q.y, q.z, 0], k * 4);
+    }
+    this.emitTex.needsUpdate = true;
+    u.uNEmit.value = Math.max(1, n);
     const g = this.tunnel.grid;
     u.uMaxAge.value = (1.25 * g.nx) / this.tunnel.U;
     u.uJitter.value = this.settings.smoke === 'wand' ? 0.9 : 0.16;
@@ -553,9 +646,10 @@ void main() {
     if (this.settings.smoke !== 'off' && steps > 0) {
       const u = this.pUpdate.uniforms;
       const disp = steps * t.U;
-      const nSub = Math.max(1, Math.ceil(disp / 0.8));
+      // sous-pas assez courts pour ne pas sauter par-dessus une pièce mince du champ de distance
+      const maxStep = t.sdf ? Math.min(0.8, (0.45 * t.sdf.h) / t.grid.dx) : 0.8;
+      const nSub = Math.min(40, Math.max(1, Math.ceil(disp / maxStep)));
       u.uMacro.value = sim.macro.texture;
-      u.uSolid.value = sim.solidTex;
       u.uMaxAge.value = (1.25 * t.grid.nx) / t.U;
       for (let k = 0; k < nSub; k++) {
         u.uState.value = this.pState[this.pIdx].texture;

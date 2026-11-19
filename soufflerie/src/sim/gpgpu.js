@@ -20,6 +20,7 @@ export class GPU {
     this.maxDrawBuffers = gl.getParameter(gl.MAX_DRAW_BUFFERS);
     this.maxTextureSize = gl.getParameter(gl.MAX_TEXTURE_SIZE);
     this.floatLinear = !!gl.getExtension('OES_texture_float_linear');
+    this.max3D = gl.getParameter(gl.MAX_3D_TEXTURE_SIZE) || 256;
   }
 
   target(w, h, count = 1, { linear = false, type = THREE.FloatType } = {}) {

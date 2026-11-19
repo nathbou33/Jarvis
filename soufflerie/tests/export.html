@@ -1,0 +1,24 @@
+<!doctype html><html><body>
+<script type="module">
+// Exporte une voiture du catalogue en STL (mm, Z vers le haut) ou GLB (m, Y vers le haut, avant vers +x)
+// pour tester l'import de modèles.
+import * as THREE from 'three';
+import { STLExporter } from 'three/addons/exporters/STLExporter.js';
+import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
+import { CARS } from '/src/geometry/cars.js';
+const q = new URLSearchParams(location.search);
+const car = CARS[q.get('car') || 'hyper'].build({});
+const fmt = q.get('fmt') || 'stl';
+const root = new THREE.Group();
+root.add(car.group);
+if (fmt === 'stl') { root.rotation.x = Math.PI / 2; root.scale.setScalar(1000); }
+else { root.rotation.y = Math.PI; }
+root.updateMatrixWorld(true);
+const toB64 = (buf) => { let s = ''; const b = new Uint8Array(buf); for (let i = 0; i < b.length; i += 0x8000) s += String.fromCharCode.apply(null, b.subarray(i, i + 0x8000)); return btoa(s); };
+if (fmt === 'stl') {
+  const dv = new STLExporter().parse(root, { binary: true });
+  window.result = toB64(dv.buffer);
+} else {
+  new GLTFExporter().parse(root, (glb) => { window.result = toB64(glb); }, (e) => { window.result = 'ERR ' + e; }, { binary: true });
+}
+</script></body></html>

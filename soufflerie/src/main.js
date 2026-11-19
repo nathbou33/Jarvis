@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import { GPU } from './sim/gpgpu.js';
 import { Tunnel, QUALITY } from './sim/tunnel.js';
 import { CARS } from './geometry/cars.js';
+import { loadModelFile, importedModel } from './geometry/importer.js';
 import { View2D, MODES_2D } from './viz/view2d.js';
 import { View3D, SMOKE_MODES, SLICE_FIELDS } from './viz/view3d.js';
 import { LineChart, fmt } from './ui/charts.js';
@@ -21,7 +22,7 @@ const state = {
   dim: '3d',
   plane: 'side', // side | silhouette | top
   sectionZ: 0,
-  sectionH: { f1: 0.3, hyper: 0.4, road: 0.55 },
+  sectionH: { f1: 0.3, hyper: 0.4, road: 0.55, import: 0.4 },
   speed: CARS.f1.speed,
   yaw: 0,
   rollingRoad: true,
@@ -37,7 +38,7 @@ const state = {
 // paramètres d'URL (liens directs) : ?car=hyper&dim=2d&q=low&v=250
 try {
   const u = new URLSearchParams(location.search);
-  if (CARS[u.get('car')]) { state.carId = u.get('car'); state.speed = CARS[state.carId].speed; }
+  if (CARS[u.get('car')] && !CARS[u.get('car')].imported) { state.carId = u.get('car'); state.speed = CARS[state.carId].speed; }
   if (['2d', '3d'].includes(u.get('dim'))) state.dim = u.get('dim');
   if (QUALITY[u.get('q')]) state.quality = u.get('q');
   if (u.get('v')) state.speed = Math.min(400, Math.max(20, Number(u.get('v')) || state.speed));
@@ -219,13 +220,52 @@ function frame(now) {
 }
 
 // ---------------------------------------------------------------------------
+// Import d'un modèle 3D
+const fileInput = el('input', { type: 'file', accept: '.glb,.gltf,.stl,.obj,model/gltf-binary,model/stl', hidden: true });
+document.body.append(fileInput);
+fileInput.addEventListener('change', () => {
+  const f = fileInput.files && fileInput.files[0];
+  fileInput.value = '';
+  if (f) importFile(f);
+});
+function pickModel() { fileInput.click(); }
+function syncCarSeg() {
+  for (const o of $('carSeg').children) o.setAttribute('aria-checked', String(o.dataset.car === state.carId));
+}
+async function importFile(f) {
+  if (busy) return;
+  busy = true;
+  $('busy').hidden = false;
+  $('busyText').textContent = `Lecture de ${f.name}…`;
+  await new Promise((r) => setTimeout(r, 30));
+  try {
+    const m = await loadModelFile(f);
+    const cfg = CARS.import;
+    state.carParams.import = Object.fromEntries(cfg.setup.map((s) => [s.key, s.def]));
+    state.carParams.import.length = Math.round(Math.min(8, Math.max(1, m.autoL)) * 100) / 100;
+    state.carId = 'import';
+    syncCarSeg();
+    busy = false;
+    rebuild({ newCar: true });
+    toast(`Modèle importé : ${m.name} · ${nf(m.nTri)} triangles`);
+  } catch (e) {
+    console.error(e);
+    busy = false;
+    $('busy').hidden = true;
+    toast(`Import impossible : ${e.message || e}`);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Barre supérieure
 function buildTopbar() {
   const seg = $('carSeg');
   seg.innerHTML = '';
   for (const [id, c] of Object.entries(CARS)) {
-    const b = el('button', { type: 'button', role: 'radio', 'aria-checked': String(id === state.carId) }, c.name === 'Citadine compacte' ? 'Citadine' : c.name);
+    const label = c.imported ? 'Importer' : c.name === 'Citadine compacte' ? 'Citadine' : c.name;
+    const b = el('button', { type: 'button', role: 'radio', 'aria-checked': String(id === state.carId), 'data-car': id, title: c.imported ? 'Importer votre modèle 3D (GLB, glTF, STL, OBJ)' : '' }, label);
     b.addEventListener('click', () => {
+      if (c.imported) { pickModel(); return; }
       if (state.carId === id) return;
       state.carId = id;
       state.speed = CARS[id].speed;
@@ -234,6 +274,15 @@ function buildTopbar() {
     });
     seg.append(b);
   }
+  // import par glisser-déposer sur la vue
+  viewport.addEventListener('dragover', (e) => { e.preventDefault(); viewport.classList.add('drop'); });
+  viewport.addEventListener('dragleave', () => viewport.classList.remove('drop'));
+  viewport.addEventListener('drop', (e) => {
+    e.preventDefault();
+    viewport.classList.remove('drop');
+    const f = e.dataTransfer?.files?.[0];
+    if (f) importFile(f);
+  });
   const dimSeg = $('dimSeg');
   for (const b of dimSeg.children) {
     b.setAttribute('aria-checked', String(b.dataset.v === state.dim));
@@ -289,9 +338,12 @@ function renderEssai() {
   root.innerHTML = '';
   const c = CARS[state.carId];
   const d = car?.dims;
+  const ii = car?.importInfo;
+  const unitName = (u) => (u === 1 ? 'mètres' : u === 0.01 ? 'centimètres' : u === 0.001 ? 'millimètres' : u === 0.0254 ? 'pouces' : 'inconnue (longueur ramenée à 4,5 m)');
   root.append(el('div', { class: 'car-card' },
-    el('h3', {}, c.name),
-    el('p', {}, c.blurb),
+    el('h3', {}, ii ? ii.file : c.name),
+    el('p', {}, ii ? `Modèle importé · ${nf(ii.nTri)} triangles · unité détectée : ${unitName(ii.unit)}. Orientation automatique (longueur selon x, avant face au vent) : utilisez les réglages ci-dessous si l'avant ou le haut sont inversés. Les roues ne tournent pas et les forces sont données pour la carrosserie entière.` : c.blurb),
+    ii ? el('div', { class: 'btn-row' }, el('button', { type: 'button', class: 'btn', onclick: pickModel }, 'Choisir un autre fichier')) : null,
     d ? el('div', { class: 'dims' },
       el('span', {}, el('b', {}, 'L'), `${nf(d.L, 2)} m`),
       el('span', {}, el('b', {}, 'l'), `${nf(d.W, 2)} m`),
@@ -354,7 +406,7 @@ function renderEssai() {
     const commit = (v) => { p[s.key] = v; rebuild({ newCar: true }); };
     if (s.type === 'choice') return el('div', { class: 'field' }, el('div', { class: 'field-head' }, el('label', {}, s.label)), chips({ options: s.options, value: p[s.key], onChange: commit }));
     if (s.type === 'toggle') return toggle({ label: s.label, checked: p[s.key], onChange: commit });
-    return slider({ label: s.label, min: s.min, max: s.max, step: s.step, value: p[s.key], unit: s.unit, format: (v) => nf(Number(v), s.step < 1 ? 1 : 0), onChange: commit });
+    return slider({ label: s.label, min: s.min, max: s.max, step: s.step, value: p[s.key], unit: s.unit, format: (v) => nf(Number(v), s.step < 0.1 ? 2 : s.step < 1 ? 1 : 0), onChange: commit });
   });
   root.append(group('Réglages de la voiture', ...setupCtl,
     el('div', { class: 'btn-row' }, el('button', { type: 'button', class: 'btn', onclick: () => { state.carParams[state.carId] = Object.fromEntries(c.setup.map((s) => [s.key, s.def])); rebuild({ newCar: true }); } }, 'Réglages d\'origine'))));
@@ -365,7 +417,7 @@ function renderEssai() {
   if (g && car) {
     const perL = tunnel.Lref / g.dx;
     const gap = car.dims.ground / g.dx;
-    const rCells = car.wheels[0].R / g.dx;
+    const rCells = car.wheels.length ? car.wheels[0].R / g.dx : 99;
     res.push(`Maille ${nf(g.dx * 1000)} mm · ${nf(perL)} cellules sur la longueur · garde au sol ${nf(gap, 1)} cellule${gap >= 2 ? 's' : ''}`);
     if (state.dim === '3d') res.push(g.sym ? 'Demi-modèle avec plan de symétrie (lacet nul).' : 'Modèle complet (lacet non nul).');
     res.push(`Taux de blocage ${nf((tunnel.blockage || 0) * 100, 1)} % (veine à frontières ouvertes).`);

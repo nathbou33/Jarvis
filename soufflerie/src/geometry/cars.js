@@ -3,6 +3,7 @@
 // z latéral. Toutes les pièces « solides » sont des maillages fermés voxelisables ;
 // les éléments plus fins qu'une cellule (suspensions, halo…) sont purement visuels.
 import * as THREE from 'three';
+import { buildImported } from './importer.js';
 import {
   curve, smoothstep, smax, dome, loftGeometry, superLoft, stations, wingElement, plate, hplate,
   ellipsoid, rod, blade, wheelVisual, cylinderZ, applyColors, mergeGeoms, carbonMaterial,
@@ -112,11 +113,18 @@ export function buildF1(P = {}) {
   }
 
   // ---------- coque ----------
-  const nose = superLoft(tableSection({
-    yb: curve([[0.05, 0.2], [0.1, 0.188], [0.35, 0.192], [0.65, 0.215], [0.9, 0.25], [1.02, 0.27]]),
-    yt: curve([[0.05, 0.222], [0.1, 0.238], [0.35, 0.28], [0.65, 0.345], [0.9, 0.43], [1.02, 0.47]]),
-    hw: curve([[0.05, 0.01], [0.1, 0.04], [0.3, 0.064], [0.6, 0.09], [0.85, 0.118], [1.02, 0.14]]),
-  }, 2.3, 2.8), stations(0.05, 1.02, 40));
+  // nez 2026 : large et plat, posé sur le plan principal, extrémité arrondie
+  const noseT = {
+    yb: curve([[0.04, 0.2], [0.12, 0.19], [0.35, 0.193], [0.65, 0.215], [0.9, 0.25], [1.02, 0.27]]),
+    yt: curve([[0.04, 0.262], [0.12, 0.272], [0.35, 0.3], [0.65, 0.355], [0.9, 0.43], [1.02, 0.47]]),
+    hw: curve([[0.04, 0.085], [0.2, 0.09], [0.45, 0.098], [0.7, 0.11], [0.9, 0.125], [1.02, 0.14]]),
+  };
+  const nose = superLoft((x) => {
+    const t = tableSection(noseT, 3.2, 2.6)(x);
+    // arrondi de l'extrémité (quart d'ellipse sur 9 cm)
+    const r = Math.sqrt(Math.max(0.0025, 1 - Math.max(0, (0.11 - x) / 0.09) ** 2));
+    return { ...t, hw: t.hw * r, hu: t.hu * (0.35 + 0.65 * r), hl: t.hl * (0.35 + 0.65 * r) };
+  }, stations(0.02, 1.02, 44));
   const chassis = superLoft(tableSection({
     yb: curve([[0.95, 0.26], [1.12, 0.17], [1.32, 0.1], [1.5, 0.058], [2.45, 0.058]]),
     yt: curve([[0.95, 0.48], [1.15, 0.555], [1.45, 0.62], [1.72, 0.655], [2.45, 0.665]]),
@@ -138,8 +146,8 @@ export function buildF1(P = {}) {
     hw: curve([[4.3, 0.105], [4.6, 0.085], [5.0, 0.055], [5.14, 0.032]]),
   }, 2.4, 2.4), stations(4.3, 5.14, 18));
   const spT = {
-    zc: curve([[1.86, 0.5], [2.0, 0.505], [2.5, 0.485], [3.0, 0.42], [3.5, 0.32], [3.9, 0.235], [4.18, 0.16]]),
-    hw: curve([[1.86, 0.17], [1.98, 0.205], [2.5, 0.205], [3.0, 0.18], [3.5, 0.135], [3.9, 0.09], [4.18, 0.05]]),
+    zc: curve([[1.86, 0.47], [2.0, 0.475], [2.5, 0.46], [3.0, 0.4], [3.5, 0.31], [3.9, 0.23], [4.18, 0.16]]),
+    hw: curve([[1.86, 0.2], [1.98, 0.235], [2.5, 0.232], [3.0, 0.2], [3.5, 0.145], [3.9, 0.095], [4.18, 0.05]]),
     yb: curve([[1.86, 0.38], [2.0, 0.35], [2.45, 0.26], [2.9, 0.17], [3.4, 0.11], [3.9, 0.08], [4.18, 0.08]]),
     yt: curve([[1.86, 0.575], [2.0, 0.605], [2.45, 0.59], [2.9, 0.52], [3.4, 0.43], [3.9, 0.36], [4.18, 0.32]]),
   };
@@ -250,7 +258,9 @@ export function buildF1(P = {}) {
   if (p.x > 1.8 && a > 0.29 && p.y < sweep) return uPal[1];
   if (a < 0.03 && n.y > 0.4 && p.x < 2.3) return uPal[2];
   if (p.x > 2.3 && p.y > 0.8) return uPal[1];
-  if (p.x > 3.7 && p.y > 0.25) return mix(uPal[0], uPal[1], 0.7);
+  // capot moteur : bleu nuit, épine dorsale bleue qui prolonge la prise d'air jusqu'à l'aileron
+  if (p.x > 2.3 && a < 0.055 + 0.03 * smoothstep(3.0, 4.4, p.x) && n.y > 0.45) return uPal[1];
+  if (p.x > 4.2 && p.y > 0.2 && p.y < 0.42 && abs(n.z) > 0.5 && lineMask(p.y - 0.3, 0.012) > 0.5) return uPal[1];
   return uPal[0];
 }`,
   });
@@ -698,6 +708,17 @@ export const CARS = {
       { key: 'mirrors', label: 'Rétroviseurs', type: 'toggle', def: true, rebuild: true },
       { key: 'rideF', label: 'Garde au sol avant', unit: 'mm', min: 90, max: 200, step: 1, def: 140, rebuild: true },
       { key: 'rideR', label: 'Garde au sol arrière', unit: 'mm', min: 90, max: 200, step: 1, def: 140, rebuild: true },
+    ],
+  },
+  import: {
+    build: buildImported, name: 'Mon modèle', short: 'Import', imported: true,
+    blurb: 'Votre propre modèle 3D (GLB, glTF, STL ou OBJ), orienté et mis à l\'échelle automatiquement.',
+    speed: 200,
+    setup: [
+      { key: 'length', label: 'Longueur réelle', unit: 'm', min: 1, max: 8, step: 0.01, def: 4.5, rebuild: true },
+      { key: 'flip', label: 'Inverser avant / arrière', type: 'toggle', def: false, rebuild: true },
+      { key: 'upside', label: 'Retourner (haut / bas)', type: 'toggle', def: false, rebuild: true },
+      { key: 'mass', label: 'Masse', unit: 'kg', min: 0, max: 3000, step: 10, def: 0, rebuild: true },
     ],
   },
 };
