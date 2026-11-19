@@ -1,14 +1,14 @@
 # Soufflerie numérique
 
-Application de soufflerie virtuelle 2D/3D pour étudier l'aérodynamique d'une **Formule 1**, d'une **Hypercar** d'endurance et d'une **citadine compacte**. L'écoulement est réellement calculé sur la carte graphique (méthode de Boltzmann sur réseau, turbulence LES), et les efforts sont mesurés sur le maillage comme avec la balance d'une soufflerie physique.
+Application de soufflerie virtuelle 2D/3D pour étudier l'aérodynamique d'une **Formule 1** (cotes du règlement FIA 2026), d'une **Hypercar** d'endurance et d'une **citadine compacte**. L'écoulement est réellement calculé sur la carte graphique (méthode de Boltzmann sur réseau, turbulence LES), et les efforts sont mesurés sur le maillage comme avec la balance d'une soufflerie physique.
 
 Elle s'installe comme une application (PWA) sur téléphone, tablette et ordinateur, et fonctionne hors ligne après la première ouverture.
 
 ## Ce que fait l'application
 
-- **Deux souffleries** : 3D (D3Q19) avec fumée en particules, plan de coupe et pression pariétale ; 2D (D2Q9) haute résolution avec fumée par peigne, coupe longitudinale, silhouette ou vue de dessus.
+- **Deux souffleries** : 3D (D3Q19) avec fumée multi-flux en particules, plan de coupe et pression pariétale ; 2D (D2Q9) haute résolution avec fumée par peigne, coupe longitudinale, silhouette ou vue de dessus.
 - **Réglages** : vitesse du vent (20 à 400 km/h), lacet (plateau tournant), sol roulant, roues en rotation, température, altitude, turbulence d'entrée, finesse du maillage.
-- **Réglages voiture** : incidences d'ailerons, aéro active mode Z/X (F1), canards (Hypercar), becquet et rétroviseurs (citadine), hauteurs de caisse avant/arrière.
+- **Réglages voiture** : incidences d'ailerons, aéro active 2026 en mode virage / ligne droite (F1), canards (Hypercar), becquet et rétroviseurs (citadine), hauteurs de caisse avant/arrière.
 - **Mesures** : traînée, appui ou portance (N et kg), Cx, Cz, SCx, SCz, finesse, équilibre avant/arrière, puissance absorbée, force latérale, répartition par composant (carrosserie, fond plat, ailerons, roues), historique et convergence.
 - **Visualisations** : fumée, vitesse, pression Cp, vorticité, pertes de pression totale, vitesse axiale, lignes de courant, sonde ponctuelle, distribution de Cp le long de la carrosserie, profil de sillage.
 - **Export** : copie des résultats, CSV de l'historique, capture d'écran.

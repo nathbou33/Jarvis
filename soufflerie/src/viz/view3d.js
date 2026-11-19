@@ -6,6 +6,7 @@ import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { COLORMAPS, atlasSampler } from './glsl.js';
 
 export const SMOKE_MODES = [
+  { id: 'multi', label: 'Multi-flux' },
   { id: 'rake-v', label: 'Peigne vertical' },
   { id: 'rake-h', label: 'Peigne horizontal' },
   { id: 'grid', label: 'Nappe complète' },
@@ -87,7 +88,7 @@ export class View3D {
     this.scene.add(this.carRoot);
 
     this.settings = {
-      smoke: 'rake-v', smokeColor: 'white', smokeDensity: 1, rakeY: 0.45, rakeZ: 0.0, rakeSpan: 1,
+      smoke: 'multi', smokeColor: 'white', smokeDensity: 1, rakeY: 0.45, rakeZ: 0.0, rakeSpan: 1,
       slice: false, sliceAxis: 'x', slicePos: 0.6, sliceField: 'vort', sliceOpacity: 0.92, mean: false,
       surfaceCp: false, cmap: 0, range: { speed: 1.6, cp: 1.2, vort: 40, loss: 1, ux: 1.4 },
     };
@@ -418,7 +419,7 @@ void main() {
 
   particleRows() {
     const q = this.tunnel?.opts?.quality;
-    return q === 'low' ? 96 : q === 'high' || q === 'ultra' ? 256 : 160;
+    return q === 'low' ? 192 : q === 'high' || q === 'ultra' ? 384 : 256;
   }
 
   _updateUniforms() {
@@ -444,7 +445,15 @@ void main() {
     const pts = [];
     const toC = (y, z) => new THREE.Vector3(xr, (y - g.y0) / g.dx, ((g.sym ? Math.abs(z) : z) - g.z0) / g.dx);
     const span = s.rakeSpan;
-    if (s.smoke === 'rake-v') {
+    if (s.smoke === 'multi') {
+      // plusieurs peignes verticaux répartis sur la largeur + un flux au ras du sol (soubassement)
+      const lanes = g.sym ? [0, 0.35, 0.62, 0.95] : [0, 0.35, -0.35, 0.62, -0.62, 0.95, -0.95];
+      const nPer = g.sym ? 12 : 8;
+      for (const zl of lanes) for (let k = 0; k < nPer; k++) pts.push(toC(0.05 + (k / (nPer - 1)) * H * 1.12, zl * W * 0.5 * span));
+      const nLow = g.sym ? 12 : 8;
+      const yLow = Math.min(0.09, 0.06 * H + 0.02);
+      for (let k = 0; k < nLow; k++) pts.push(toC(yLow, g.sym ? ((k + 0.5) / nLow) * W * 0.5 : ((k + 0.5) / nLow - 0.5) * W));
+    } else if (s.smoke === 'rake-v') {
       const n = 15;
       for (let k = 0; k < n; k++) pts.push(toC(0.03 + (k / (n - 1)) * H * 1.15 * span, s.rakeZ * W * 0.6));
     } else if (s.smoke === 'rake-h') {
@@ -506,7 +515,7 @@ void main() {
     const g = t.grid;
     const vScene = steps * t.U * g.dx; // m parcourus par l'air dans la scène pendant cette image
     if (t.opts.rotatingWheels) {
-      for (let i = 0; i < this.car.wheelGroups.length; i++) this.car.wheelGroups[i].rotation.z -= vScene / this.car.wheels[i].R;
+      for (let i = 0; i < this.car.wheelGroups.length; i++) { const wg = this.car.wheelGroups[i]; (wg.userData.spin || wg).rotation.z -= vScene / this.car.wheels[i].R; }
     }
     if (t.opts.rollingRoad) {
       this.beltOffset += vScene / 0.5;
@@ -590,7 +599,7 @@ void main() {
       pu.uPx.value = fovPx;
       const dens = this.settings.smokeDensity;
       const nPerEmitter = (this.PW * this.PH) / Math.max(1, this.pUpdate.uniforms.uNEmit.value);
-      pu.uSize.value = 0.03 * Math.max(0.7, Math.min(1.5, Math.sqrt(t.grid.dx / 0.06)));
+      pu.uSize.value = 0.036 * Math.max(0.7, Math.min(1.5, Math.sqrt(t.grid.dx / 0.06)));
       pu.uAlpha.value = Math.min(0.9, (this.settings.smoke === 'wand' ? 0.14 : 0.3) * dens * Math.sqrt(1500 / nPerEmitter + 0.15));
       pu.uColorMode.value = this.settings.smokeColor === 'speed' ? 1 : 0;
       this.points.visible = this.settings.smoke !== 'off';

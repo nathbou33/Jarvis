@@ -32,11 +32,17 @@ ${live}
   <li><b>Éléments fins.</b> Bras de suspension, halo et rétroviseurs de moins d'une cellule sont absents ou ramenés à une cellule.</li>
   <li><b>Compressibilité.</b> Le solveur est faiblement compressible (Mach réseau ≈ 0,14–0,17), cohérent avec un écoulement routier incompressible (Mach réel &lt; 0,35).</li>
   <li><b>Moyennes.</b> L'écoulement est instationnaire : les efforts affichés sont moyennés sur les 1,6 dernières unités de temps convectif t* = t·V/L, après exclusion du transitoire (1,6 t* après un démarrage, 0,4 à 0,6 t* après un changement de réglage). L'indicateur « stabilisé » s'allume quand les deux moitiés de la fenêtre concordent à 5 % près. L'option « champ moyen » affiche une moyenne temporelle glissante des champs.</li>
-  <li><b>Modèles de voitures.</b> Géométries génériques construites aux cotes réelles de chaque catégorie (empattement, voies, hauteurs, pneumatiques), sans reproduire un modèle commercial précis.</li>
+  <li><b>Modèles de voitures.</b> Géométries génériques construites aux cotes réelles de chaque catégorie, sans reproduire une voiture de marque précise.
+    <ul>
+      <li><b>Formule 1</b>, grandes cotes du règlement technique FIA 2026 : empattement 3 400 mm, largeur 1 900 mm, hauteur 950 mm, pneus 18" plus étroits (AV 280 mm, AR 375 mm), aileron avant réduit à 1 800 mm, aileron arrière à deux éléments sans « beam wing », aéro active (volets avant et arrière en mode virage ou ligne droite), fond plus plat aux tunnels réduits, masse minimale 768 kg.</li>
+      <li><b>Hypercar</b> type LMH : 4,95 × 2,00 m, empattement 3,10 m, pneus 29/71-18 et 34/71-18, dérive dorsale, aileron à cols de cygne, masse 1 030 kg.</li>
+      <li><b>Citadine</b> compacte 5 portes : 4,28 × 1,79 × 1,46 m, empattement 2,62 m, pneus 225/45 R17, masse 1 250 kg.</li>
+    </ul>
+  </li>
 </ul>
 <h3>Lecture des visualisations</h3>
 <ul>
-  <li><b>Fumée</b> : traceur passif lâché par un peigne en amont, comme en soufflerie réelle (lignes d'émission). En 3D, des particules sont transportées par le champ de vitesse calculé.</li>
+  <li><b>Fumée</b> : traceur passif lâché en amont, comme en soufflerie réelle (lignes d'émission). En 3D, des particules sont transportées par le champ de vitesse calculé ; le mode « multi-flux » lâche plusieurs peignes répartis sur la largeur et un flux au ras du sol pour suivre le soubassement.</li>
   <li><b>Pertes de pression totale</b> : 1 − Cp<sub>0</sub> ; le sillage et les tourbillons apparaissent nettement.</li>
   <li><b>Plan de coupe transversal</b> derrière la voiture : équivalent d'un sondage de sillage, idéal pour voir les tourbillons de bout d'aileron et des roues.</li>
   <li><b>Ralenti</b> : la fumée et les roues tournent au ralenti, à une vitesse cohérente entre elles ; le temps physique simulé est indiqué dans la barre d'état.</li>

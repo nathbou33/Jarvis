@@ -10,7 +10,7 @@ const gpu = new GPU(renderer);
 const tunnel = new Tunnel(gpu);
 const carId = q.get('car') || 'road';
 const car = CARS[carId].build({});
-tunnel.setup({ car, mode: '3d', quality: q.get('q') || 'low', yaw: 0, speed: 130, tempC: 20, altitude: 0, rollingRoad: true, rotatingWheels: true, turbulence: 0, carParams: {} });
+tunnel.setup({ car, mode: '3d', quality: q.get('q') || 'low', yaw: Number(q.get('yaw') || 0), speed: 130, tempC: 20, altitude: 0, rollingRoad: true, rotatingWheels: true, turbulence: 0, carParams: {} });
 const g = tunnel.grid, b = tunnel.bounds;
 let out = 0, total = 0;
 const perCat = {};
@@ -24,7 +24,7 @@ for (let k = 0; k < g.nz; k++) for (let j = 0; j < g.ny; j++) for (let i = 0; i 
   if (x < b.min.x - g.dx || x > b.max.x + g.dx || y > b.max.y + g.dx || z < b.min.z - g.dx || z > b.max.z + g.dx) out++;
 }
 // coupe centrale k = nz/2 en ASCII
-const kc = Math.floor(g.nz / 2);
+const kc = Number(q.get('kc') ?? Math.floor(g.nz / 2));
 for (let j = g.ny - 1; j >= 0; j--) { let row = ''; for (let i = 0; i < g.nx; i++) { const c = tunnel.cat[i + g.nx * (j + g.ny * kc)]; row += c ? String(c) : '.'; } slices.push(row); }
 // plan horizontal j = 3
 const jh = Number(q.get('j') || 3);

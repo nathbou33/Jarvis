@@ -23,7 +23,7 @@ export class View2D {
     this.quad.frustumCulled = false;
     this.scene.add(this.quad);
     this.view = { cx: 0, cy: 0, ppc: 1 }; // centre (cellules), pixels par cellule
-    this.settings = { mode: 'smoke', mean: false, cmap: 0, smokeOverlay: false, streamlines: false, range: { speed: 1.6, cp: 1.2, vort: 60, loss: 1, ux: 1.4 }, rakeCount: 22, rakeSpan: 1.0, rakeY: 0.5 };
+    this.settings = { mode: 'smoke', mean: false, cmap: 0, smokeOverlay: false, streamlines: false, range: { speed: 1.6, cp: 1.2, vort: 60, loss: 1, ux: 1.4 }, rakeCount: 32, rakeSpan: 1.0, rakeY: 0.5 };
     this.belt = 0;
     this.readback = null;
     this.readbackAt = 0;
@@ -238,7 +238,7 @@ void main() {
     for (let k = 0; k < nSub; k++) {
       const [phi, hat, til, out] = [0, 1, 2, 3].map((j) => this.dye[(this.dyeIdx + j) % 4]);
       const am = this.advectMat.uniforms;
-      am.uMacro.value = sim.macro.texture;
+      am.uMacro.value = sim.fast.texture;
       am.uPhi.value = phi.texture;
       am.uDt.value = dt;
       this.gpu.pass(this.advectMat, hat);
@@ -249,7 +249,7 @@ void main() {
       cm.uPhi.value = phi.texture;
       cm.uHat.value = hat.texture;
       cm.uTil.value = til.texture;
-      cm.uMacro.value = sim.macro.texture;
+      cm.uMacro.value = sim.fast.texture;
       cm.uDt.value = dt;
       this.gpu.pass(this.combineMat, out);
       this.dyeIdx = (this.dyeIdx + 3) % 4;

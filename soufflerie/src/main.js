@@ -176,7 +176,8 @@ function frame(now) {
   let steps = 0;
   if (state.running) {
     steps = Math.max(1, Math.round(spf));
-    tunnel.step(steps);
+    if (state.dim === '2d') tunnel.stepFiltered(steps, 5);
+    else tunnel.step(steps);
     stepsSinceMeasure += steps;
     stepAcc += steps;
   }
@@ -296,6 +297,7 @@ function renderEssai() {
       el('span', {}, el('b', {}, 'l'), `${nf(d.W, 2)} m`),
       el('span', {}, el('b', {}, 'h'), `${nf(d.H, 2)} m`),
       el('span', {}, el('b', {}, 'Emp.'), `${nf(d.wheelbase, 2)} m`),
+      d.mass ? el('span', {}, el('b', {}, 'Masse'), `${nf(d.mass)} kg`) : null,
       tunnel.area ? el('span', {}, el('b', {}, 'S'), `${nf(tunnel.area, 2)} m²`) : null) : null));
 
   // vitesse
@@ -482,26 +484,27 @@ function updateMeasures() {
   if (!two) {
     const P = (m.drag ?? 0) * tunnel.V;
     k.push(kpi('Puissance absorbée', nf(P / 1000, 1), 'kW', `${nf(P / 735.5)} ch à ${nf(state.speed)} km/h`));
+    if (car.dims.mass) {
+      const ratio = -(m.lift ?? NaN) / (car.dims.mass * 9.81);
+      k.push(kpi(ratio >= 0 ? 'Appui / poids' : 'Portance / poids', nf(Math.abs(ratio) * 100), '%', `masse ${nf(car.dims.mass)} kg`));
+    }
     if (state.yaw !== 0) k.push(kpi('Force latérale', nf(m.side), 'N', `Cy ${nf(m.Cy, 3)}`));
     else k.push(kpi('Pression dynamique', nf(tunnel.q), 'Pa', `½ρV² · ρ = ${nf(tunnel.air.rho, 3)} kg/m³`));
   }
   $('kpis').replaceChildren(...k);
   if ($('balance')) {
+    const down = -(m.lift ?? NaN);
     const b = m.balance;
-    const ok = isFinite(b) && Math.abs(m.lift ?? 0) > 1e-6;
-    const front = ok ? b * 100 : NaN;
-    $('balance').replaceChildren(
+    const okPct = isFinite(b) && down > 0 && b > -0.2 && b < 1.2;
+    const word = (v) => (v >= 0 ? 'd\'appui' : 'de portance');
+    const kids = [
       el('div', { class: 'kpis' },
-        kpi('Avant', nf(front, 1), '%', `${nf(-(m.loadFront ?? NaN))} ${unitF} ${(m.loadFront ?? 0) >= 0 ? 'd\'appui' : 'de portance'}`),
-        kpi('Arrière', nf(ok ? 100 - front : NaN, 1), '%', `${nf(-(m.loadRear ?? NaN))} ${unitF} ${(m.loadRear ?? 0) >= 0 ? 'd\'appui' : 'de portance'}`)),
-      el('div', { class: 'balance-bar', 'aria-hidden': 'true' }, el('i', { style: `width:${ok ? Math.max(0, Math.min(100, front)) : 50}%` }), el('b')),
-      el('p', { class: 'hint' }, 'Part de l\'effort vertical repris par chaque essieu (moment de tangage compris).'));
-    // signe : charge positive = appui → affichage en valeur absolue avec libellé
-    const ks = $('balance').querySelectorAll('.kpi .s');
-    if (ks.length === 2 && ok) {
-      ks[0].textContent = `${nf(Math.abs(m.loadFront))} ${unitF} ${m.loadFront >= 0 ? 'd\'appui' : 'de portance'}`;
-      ks[1].textContent = `${nf(Math.abs(m.loadRear))} ${unitF} ${m.loadRear >= 0 ? 'd\'appui' : 'de portance'}`;
-    }
+        kpi('Essieu avant', okPct ? nf(b * 100, 1) : nf(Math.abs(m.loadFront ?? NaN)), okPct ? '%' : unitF, okPct ? `${nf(Math.abs(m.loadFront))} ${unitF} ${word(m.loadFront)}` : word(m.loadFront ?? 0)),
+        kpi('Essieu arrière', okPct ? nf((1 - b) * 100, 1) : nf(Math.abs(m.loadRear ?? NaN)), okPct ? '%' : unitF, okPct ? `${nf(Math.abs(m.loadRear))} ${unitF} ${word(m.loadRear)}` : word(m.loadRear ?? 0))),
+    ];
+    if (okPct) kids.push(el('div', { class: 'balance-bar', 'aria-hidden': 'true' }, el('i', { style: `width:${Math.max(0, Math.min(100, b * 100))}%` }), el('b')));
+    kids.push(el('p', { class: 'hint' }, okPct ? 'Part de l\'appui reprise par chaque essieu (moment de tangage compris).' : 'Effort vertical aérodynamique sur chaque essieu (moment de tangage compris). Le pourcentage d\'équilibre n\'a de sens qu\'avec de l\'appui.'));
+    $('balance').replaceChildren(...kids);
   }
   // composants
   const names = car.catNames;
@@ -660,7 +663,7 @@ function updateHud() {
   } else html += chip('Latéral', nf(m.side), unitF, 'big');
   html += chip('Cx', nf(m.Cx, 3));
   html += top ? chip('Cy', nf(m.Cy, 3)) : chip('Cz', nf(m.Cz, 3));
-  if (!top && isFinite(m.balance) && Math.abs(m.lift) > 1e-6) html += chip('Équilibre AV', nf(m.balance * 100, 1), '%', 'opt');
+  if (!top && isFinite(m.balance) && m.lift < 0 && m.balance > -0.2 && m.balance < 1.2) html += chip('Équilibre AV', nf(m.balance * 100, 1), '%', 'opt');
   $('hudBottom').innerHTML = html;
 }
 

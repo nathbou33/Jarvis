@@ -62,6 +62,9 @@ export class LBM {
     this.B = makeSet();
     this.macro = gpu.target(this.texW, this.texH, 1);
     this.meanRT = [gpu.target(this.texW, this.texH, 1), gpu.target(this.texW, this.texH, 1)];
+    this.fastRT = [gpu.target(this.texW, this.texH, 1), gpu.target(this.texW, this.texH, 1)];
+    this.fastIdx = 0;
+    this.fastFresh = true;
     this.meanIdx = 0;
     this.meanFresh = true;
     this.force = gpu.target(this.texW, this.texH, 4);
@@ -605,6 +608,20 @@ void main() {
   resetMean() {
     this.meanFresh = true;
   }
+  // Vitesse filtrée sur quelques pas (transport des traceurs sans les oscillations acoustiques)
+  updateFast(steps, tauSteps) {
+    const a = this.fastFresh ? 1 : 1 - Math.exp(-Math.max(steps, 1) / Math.max(1, tauSteps));
+    this.fastFresh = false;
+    const u = this.meanMat.uniforms;
+    u.uCur.value = this.macro.texture;
+    u.uPrev.value = this.fastRT[this.fastIdx].texture;
+    u.uA.value = a;
+    this.gpu.pass(this.meanMat, this.fastRT[1 - this.fastIdx]);
+    this.fastIdx = 1 - this.fastIdx;
+  }
+  get fast() {
+    return this.fastFresh ? this.macro : this.fastRT[this.fastIdx];
+  }
   get mean() {
     return this.meanRT[this.meanIdx];
   }
@@ -641,7 +658,7 @@ void main() {
   dispose() {
     for (const rt of [...this.A.rts, ...this.B.rts]) rt.dispose();
     this.macro.dispose();
-    for (const rt of this.meanRT) rt.dispose();
+    for (const rt of [...this.meanRT, ...this.fastRT]) rt.dispose();
     this.meanMat.dispose();
     this.force.dispose();
     this.reducer.dispose();

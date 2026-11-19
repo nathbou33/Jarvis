@@ -50,7 +50,10 @@ export class Tunnel {
     this.turntable = new THREE.Vector3(cx, 0, 0);
 
     // Triangles en repère soufflerie
-    const solids = car.solids.map((s) => {
+    // les plaques minces situées dans le plan de symétrie (dérive, mât central) sont exclues
+    // d'une coupe longitudinale 2D, où elles deviendraient des murs pleins
+    const sectionCut = opts.mode === 'side' && !opts.silhouette;
+    const solids = car.solids.filter((s) => !(sectionCut && s.noSection)).map((s) => {
       const m = new THREE.Matrix4().copy(this.yawMatrix);
       if (s.matrix) m.multiply(s.matrix);
       return { tris: trianglesOf(s.geometry, m), cat: s.cat, thin: s.thin, priority: s.priority };
@@ -245,6 +248,16 @@ export class Tunnel {
   get tStarTotal() {
     if (!this.sim) return 0;
     return (this.sim.steps * this.U * this.grid.dx) / this.Lref;
+  }
+
+  // Avance de n pas en tenant à jour la vitesse filtrée (par paquets de `chunk` pas)
+  stepFiltered(n, chunk = 5) {
+    for (let done = 0; done < n; done += chunk) {
+      const k = Math.min(chunk, n - done);
+      this.step(k);
+      this.sim.computeMacro();
+      this.sim.updateFast(k, 12);
+    }
   }
 
   step(n) {
